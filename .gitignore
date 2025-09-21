@@ -1,0 +1,114 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# C extensions
+*.so
+
+# Distribution / packaging
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+*.egg-info/
+.installed.cfg
+*.egg
+pip-wheel-metadata/
+
+# Virtual environments
+env/
+venv/
+ENV/
+.venv/
+venv.bak/
+venv3/
+python_env/
+.env/
+.env.*   # ignore env files containing secrets; keep .env.example in repo if needed
+
+# Installer logs
+pip-log.txt
+pip-delete-this-directory.txt
+
+# Unit test / coverage reports
+htmlcov/
+.tox/
+.nox/
+.coverage
+.coverage.*
+.cache
+.pytest_cache/
+nosetests.xml
+coverage.xml
+*,cover
+
+# Translations
+*.mo
+*.pot
+
+# Django stuff (if used alongside)
+*.log
+local_settings.py
+db.sqlite3
+db.sqlite3-journal
+
+# Flask / FastAPI / Uvicorn logs and runtime
+*.log
+gunicorn.*.log
+uvicorn.log
+
+# SQLalchemy / Alembic
+*.db
+*.sqlite3
+
+# PyCharm / VSCode
+.idea/
+.vscode/
+*.sublime-workspace
+*.sublime-project
+
+# mypy / pylance / linters
+.mypy_cache/
+.pyre/
+.pytype/
+
+# Jupyter
+.ipynb_checkpoints
+
+# Virtualenv & pipenv / poetry
+Pipfile.lock
+poetry.lock
+.venv/
+
+# PyCharm caches
+*.iml
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Docker
+docker-compose.override.yml
+.env.*.local
+.env.local
+# ignore .env but allow example
+!.env.example
+
+# Node (if frontend assets present)
+node_modules/
+npm-debug.log
+yarn-error.log
+
+# Misc
+*.pem
+*.key
+*.crt
