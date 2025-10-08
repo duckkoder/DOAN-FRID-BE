@@ -112,3 +112,12 @@ yarn-error.log
 *.pem
 *.key
 *.crt
+
+# Ignore all .env files
+.env
+.env.local
+.env.*.local
+.env.development
+.env.production
+.env.test
+!.env.example
