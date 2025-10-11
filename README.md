@@ -770,4 +770,543 @@ Nếu có vấn đề, tạo issue trên GitHub hoặc liên hệ team qua:
 
 ---
 
-**Happy Coding! 🚀**
+## 🔄 Hướng dẫn chi tiết Database Migration với Alembic
+
+### 📋 Workflow hoàn chỉnh
+
+#### **Bước 1: Khởi tạo Alembic (Chỉ làm 1 lần đầu tiên)**
+
+```powershell
+# Khởi tạo Alembic trong project
+alembic init alembic
+```
+
+**Kết quả:**
+```
+Creating directory D:\PBL6\PBL6BE\back-end\alembic ...  done
+Creating directory D:\PBL6\PBL6BE\back-end\alembic\versions ...  done
+Generating D:\PBL6\PBL6BE\back-end\alembic.ini ...  done
+Generating D:\PBL6\PBL6BE\back-end\alembic\env.py ...  done
+Generating D:\PBL6\PBL6BE\back-end\alembic\script.py.mako ...  done
+```
+
+---
+
+#### **Bước 2: Tạo Migration mới**
+
+**Sau khi tạo hoặc sửa Model trong `app/models/`:**
+
+```powershell
+# Auto-generate migration từ SQLAlchemy models
+alembic revision --autogenerate -m "Create users table"
+
+# Hoặc tạo migration thủ công (empty)
+alembic revision -m "Add custom constraints"
+```
+
+**Output thành công:**
+```
+INFO  [alembic.runtime.migration] Context impl PostgresqlImpl.
+INFO  [alembic.runtime.migration] Will assume transactional DDL.
+INFO  [alembic.autogenerate.compare] Detected added table 'users'
+INFO  [alembic.autogenerate.compare] Detected added index 'ix_users_email' on '['email']'
+  Generating D:\PBL6\PBL6BE\back-end\alembic\versions\2024_10_11_1234_create_users_table.py ...  done
+```
+
+---
+
+#### **Bước 3: Kiểm tra Migration File**
+
+```powershell
+# Xem file migration vừa tạo
+code alembic\versions\2024_10_11_1234_create_users_table.py
+
+# Hoặc dùng editor khác
+notepad alembic\versions\2024_10_11_1234_create_users_table.py
+```
+
+**Review nội dung migration:**
+- Kiểm tra các thay đổi có đúng không
+- Verify SQL sẽ được generate
+- Sửa thủ công nếu cần (data migration, custom SQL)
+
+---
+
+#### **Bước 4: Apply Migration vào Database**
+
+```powershell
+# Upgrade lên version mới nhất
+alembic upgrade head
+
+# Upgrade từng bước (1 version)
+alembic upgrade +1
+
+# Upgrade đến revision cụ thể
+alembic upgrade abc123def456
+```
+
+**Output thành công:**
+```
+INFO  [alembic.runtime.migration] Context impl PostgresqlImpl.
+INFO  [alembic.runtime.migration] Will assume transactional DDL.
+INFO  [alembic.runtime.migration] Running upgrade  -> abc123, Create users table
+```
+
+---
+
+#### **Bước 5: Verify Migration**
+
+```powershell
+# Xem version hiện tại
+alembic current
+
+# Xem lịch sử migrations
+alembic history
+
+# Xem chi tiết
+alembic history --verbose
+```
+
+**Kiểm tra trong database:**
+```powershell
+# Kết nối PostgreSQL
+psql -U postgres -d ai_attendance
+
+# Xem danh sách bảng
+\dt
+
+# Xem cấu trúc bảng
+\d users
+
+# Xem alembic version
+SELECT * FROM alembic_version;
+
+# Thoát
+\q
+```
+
+---
+
+### 🔄 Các lệnh Migration thường dùng
+
+#### **Xem thông tin Migrations**
+
+```powershell
+# Hiển thị revision hiện tại
+alembic current
+
+# Liệt kê tất cả migrations
+alembic history
+
+# Hiển thị chi tiết với date & message
+alembic history --verbose
+
+# Hiển thị migrations trong range
+alembic history -r base:head
+
+# Show SQL sẽ chạy (không execute)
+alembic upgrade head --sql
+```
+
+#### **Upgrade Migrations**
+
+```powershell
+# Upgrade lên version mới nhất
+alembic upgrade head
+
+# Upgrade lên +1 version
+alembic upgrade +1
+
+# Upgrade lên +2 versions
+alembic upgrade +2
+
+# Upgrade đến revision cụ thể
+alembic upgrade abc123def456
+
+# Upgrade từ revision A đến B
+alembic upgrade abc123:def456
+```
+
+#### **Downgrade (Rollback) Migrations**
+
+```powershell
+# Downgrade về version trước đó
+alembic downgrade -1
+
+# Downgrade về -2 versions
+alembic downgrade -2
+
+# Downgrade về revision cụ thể
+alembic downgrade abc123def456
+
+# Downgrade về base (xóa tất cả)
+alembic downgrade base
+
+# Show SQL sẽ chạy khi downgrade
+alembic downgrade -1 --sql
+```
+
+#### **Tạo Migrations**
+
+```powershell
+# Auto-generate từ models
+alembic revision --autogenerate -m "Description"
+
+# Tạo empty migration (manual)
+alembic revision -m "Description"
+
+# Tạo migration với revision ID custom
+alembic revision --rev-id abc123 -m "Description"
+```
+
+#### **Stamp & Reset**
+
+```powershell
+# Đánh dấu database ở revision cụ thể (không chạy SQL)
+alembic stamp head
+alembic stamp abc123def456
+
+# Stamp về base
+alembic stamp base
+```
+
+---
+
+### ⚠️ Xử lý lỗi Migration
+
+#### **Lỗi 1: `Can't locate revision identified by 'abc123'`**
+
+**Nguyên nhân:** Database có revision không tồn tại trong `alembic/versions/`
+
+**Cách fix:**
+
+```powershell
+# Option 1: Reset alembic_version table
+psql -U postgres -d ai_attendance -c "DELETE FROM alembic_version;"
+
+# Option 2: Stamp về revision hiện có
+alembic stamp head
+
+# Option 3: Reset hoàn toàn (XÓA DATA)
+psql -U postgres -d ai_attendance
+```
+```sql
+-- Trong psql:
+DROP SCHEMA public CASCADE;
+CREATE SCHEMA public;
+GRANT ALL ON SCHEMA public TO postgres;
+GRANT ALL ON SCHEMA public TO public;
+\q
+```
+```powershell
+# Sau đó xóa migrations cũ và tạo lại
+Remove-Item -Recurse -Force alembic\versions\*
+alembic revision --autogenerate -m "Initial migration"
+alembic upgrade head
+```
+
+---
+
+#### **Lỗi 2: `Target database is not up to date`**
+
+**Nguyên nhân:** Database đang ở version cũ hơn so với code
+
+**Cách fix:**
+
+```powershell
+# Xem version hiện tại
+alembic current
+
+# Xem các migrations pending
+alembic history
+
+# Upgrade lên latest
+alembic upgrade head
+```
+
+---
+
+#### **Lỗi 3: `FAILED: Multiple head revisions are present`**
+
+**Nguyên nhân:** Có nhiều migrations cùng là "head" (branching)
+
+**Cách fix:**
+
+```powershell
+# Xem các heads
+alembic heads
+
+# Merge các heads
+alembic merge -m "Merge heads" head1_id head2_id
+
+# Apply merge
+alembic upgrade head
+```
+
+---
+
+#### **Lỗi 4: `Table 'xxx' already exists`**
+
+**Nguyên nhân:** Migration cố tạo bảng đã tồn tại
+
+**Cách fix:**
+
+```powershell
+# Option 1: Stamp database về revision hiện tại
+alembic stamp head
+
+# Option 2: Edit migration file để skip CREATE TABLE
+code alembic\versions\abc123_migration.py
+```
+
+Trong migration file, thêm check:
+```python
+def upgrade():
+    # Kiểm tra table có tồn tại không
+    from sqlalchemy import inspect
+    bind = op.get_bind()
+    inspector = inspect(bind)
+    
+    if 'users' not in inspector.get_table_names():
+        op.create_table('users', ...)
+```
+
+---
+
+#### **Lỗi 5: `Database connection error`**
+
+**Nguyên nhân:** Không kết nối được PostgreSQL
+
+**Cách fix:**
+
+```powershell
+# Kiểm tra PostgreSQL đang chạy
+Get-Service -Name postgresql*
+
+# Kiểm tra DATABASE_URL trong .env
+cat .env | Select-String "DATABASE_URL"
+
+# Test connection
+psql -U postgres -d ai_attendance
+
+# Nếu password sai, reset trong pgAdmin hoặc:
+psql -U postgres
+ALTER USER postgres WITH PASSWORD 'new_password';
+\q
+```
+
+Sau đó update `.env`:
+```env
+DATABASE_URL=postgresql://postgres:new_password@localhost:5432/ai_attendance
+```
+
+---
+
+#### **Lỗi 6: `No changes in schema detected`**
+
+**Nguyên nhân:** Alembic không detect thay đổi trong models
+
+**Cách fix:**
+
+```powershell
+# 1. Xóa cache Python
+Remove-Item -Recurse -Force app\__pycache__
+Remove-Item -Recurse -Force app\models\__pycache__
+
+# 2. Verify models được import trong alembic/env.py
+code alembic\env.py
+```
+
+Đảm bảo trong `alembic/env.py`:
+```python
+from app.models.base import Base
+from app.models.user import User  # Import TẤT CẢ models
+from app.models.class_model import Class
+# ...
+
+target_metadata = Base.metadata  # Phải set
+```
+
+```powershell
+# 3. Tạo lại migration
+alembic revision --autogenerate -m "Update schema"
+```
+
+---
+
+#### **Lỗi 7: `sqlalchemy.exc.IntegrityError: duplicate key`**
+
+**Nguyên nhân:** Violation unique constraint khi apply migration
+
+**Cách fix:**
+
+```powershell
+# Option 1: Clean data trước
+psql -U postgres -d ai_attendance
+```
+```sql
+-- Xóa data duplicate
+DELETE FROM users WHERE email = 'duplicate@example.com';
+\q
+```
+```powershell
+# Sau đó upgrade lại
+alembic upgrade head
+```
+
+**Option 2: Edit migration để handle duplicates:**
+```python
+def upgrade():
+    # Xóa duplicates trước khi add constraint
+    op.execute("""
+        DELETE FROM users a USING users b
+        WHERE a.id < b.id AND a.email = b.email
+    """)
+    
+    # Sau đó add unique constraint
+    op.create_unique_constraint('uq_users_email', 'users', ['email'])
+```
+
+---
+
+### 🔄 Workflow Reset Migration hoàn toàn
+
+Khi cần reset database và migrations từ đầu:
+
+```powershell
+# Bước 1: Backup database (quan trọng!)
+pg_dump -U postgres ai_attendance > backup_$(Get-Date -Format "yyyyMMdd_HHmmss").sql
+
+# Bước 2: Drop và tạo lại database
+psql -U postgres
+```
+```sql
+DROP DATABASE ai_attendance;
+CREATE DATABASE ai_attendance;
+\c ai_attendance
+CREATE EXTENSION IF NOT EXISTS vector;
+\q
+```
+```powershell
+# Bước 3: Xóa tất cả migrations
+Remove-Item -Recurse -Force alembic\versions\*
+
+# Bước 4: Clear cache
+Remove-Item -Recurse -Force app\__pycache__
+Remove-Item -Recurse -Force app\models\__pycache__
+Remove-Item -Recurse -Force app\core\__pycache__
+
+# Bước 5: Tạo migration mới
+alembic revision --autogenerate -m "Initial database schema"
+
+# Bước 6: Apply migration
+alembic upgrade head
+
+# Bước 7: Verify
+alembic current
+psql -U postgres -d ai_attendance -c "\dt"
+```
+
+---
+
+### 📊 Best Practices
+
+#### **✅ Nên làm:**
+
+1. **Luôn review migration file** trước khi apply
+2. **Backup database** trước khi upgrade production
+3. **Test migration** trên môi trường dev trước
+4. **Viết descriptive messages** cho migrations
+5. **Commit migration files** vào Git
+6. **Downgrade test** để verify rollback hoạt động
+
+#### **❌ Không nên:**
+
+1. **Không edit migration đã apply** (tạo mới thay vì sửa)
+2. **Không xóa migration files** đã apply
+3. **Không skip revisions** khi deploy
+4. **Không commit `.env`** lên Git
+5. **Không apply trực tiếp lên production** chưa test
+
+---
+
+### 🔍 Debug Commands
+
+```powershell
+# Xem SQL sẽ chạy mà không execute
+alembic upgrade head --sql > migration.sql
+alembic downgrade -1 --sql > rollback.sql
+
+# Check connection đến database
+python -c "from app.core.config import settings; print(settings.DATABASE_URL)"
+
+# Test import models
+python -c "from app.models.user import User; print(User.__table__)"
+
+# Verify alembic config
+alembic --help
+alembic current -v
+```
+
+---
+
+### 📝 Migration File Structure
+
+Migration file mẫu (`alembic/versions/abc123_create_users.py`):
+
+```python
+"""Create users table
+
+Revision ID: abc123def456
+Revises: previous_revision
+Create Date: 2024-10-11 12:34:56.789012
+"""
+from alembic import op
+import sqlalchemy as sa
+
+# revision identifiers
+revision = 'abc123def456'
+down_revision = 'previous_revision'  # None nếu là migration đầu
+branch_labels = None
+depends_on = None
+
+
+def upgrade():
+    """Apply changes to database."""
+    op.create_table(
+        'users',
+        sa.Column('id', sa.Integer(), autoincrement=True, nullable=False),
+        sa.Column('email', sa.String(255), nullable=False),
+        sa.Column('password_hash', sa.String(255), nullable=False),
+        sa.Column('created_at', sa.DateTime(), nullable=False),
+        sa.Column('updated_at', sa.DateTime(), nullable=False),
+        sa.PrimaryKeyConstraint('id'),
+        sa.UniqueConstraint('email')
+    )
+    op.create_index('ix_users_email', 'users', ['email'])
+
+
+def downgrade():
+    """Revert changes from database."""
+    op.drop_index('ix_users_email', table_name='users')
+    op.drop_table('users')
+```
+
+---
+
+### 🎯 Quick Reference
+
+| Lệnh | Mô tả |
+|------|-------|
+| `alembic init alembic` | Khởi tạo Alembic (1 lần) |
+| `alembic revision --autogenerate -m "msg"` | Tạo migration tự động |
+| `alembic upgrade head` | Apply tất cả migrations |
+| `alembic downgrade -1` | Rollback 1 migration |
+| `alembic current` | Xem version hiện tại |
+| `alembic history` | Xem lịch sử migrations |
+| `alembic stamp head` | Đánh dấu database ở version mới nhất |
+| `alembic upgrade head --sql` | Xem SQL sẽ chạy |
+
+---
+
+**Happy Migrating! 🚀**
