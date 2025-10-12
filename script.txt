@@ -1,0 +1,290 @@
+// AI-Powered Attendance System - DBML schema (fixed: removed unsupported 'on delete' tokens)
+
+Project "AI Attendance System" {
+  database_type: 'PostgreSQL'
+  Note: 'Schema for AI face-recognition attendance system'
+}
+
+Enum user_role {
+  admin
+  teacher
+  student
+}
+
+Enum embedding_status {
+  pending
+  approved
+  rejected
+}
+
+Enum session_status {
+  scheduled
+  ongoing
+  finished
+}
+
+Enum attendance_status {
+  present
+  absent
+  excused
+}
+
+Enum request_status {
+  pending
+  approved
+  rejected
+  cancelled
+}
+
+/*
+  Users (base)
+*/
+Table users {
+  id integer [pk, increment]
+  full_name varchar(255) [not null]
+  email varchar(255) [unique, not null]
+  password_hash varchar(255) [not null]
+  role user_role [not null]
+  is_active boolean [default: true]
+  avatar_url varchar(255)
+  phone varchar(50)
+  last_login timestamptz
+  is_verified boolean [default: false]
+  created_at timestamptz [default: `now()`]
+  updated_at timestamptz [default: `now()`]
+}
+
+/* Admins (1:1) */
+Table admins {
+  id integer [pk, increment]
+  user_id integer [unique, not null, ref: > users.id]
+  created_at timestamptz [default: `now()`]
+  updated_at timestamptz [default: `now()`]
+}
+
+/* Teachers (1:1) */
+Table teachers {
+  id integer [pk, increment]
+  user_id integer [unique, not null, ref: > users.id]
+  teacher_code varchar(20) [unique, not null]
+  department varchar(100)
+  specialization varchar(100)
+  created_at timestamptz [default: `now()`]
+  updated_at timestamptz [default: `now()`]
+}
+
+/* Students (1:1) */
+Table students {
+  id integer [pk, increment]
+  user_id integer [unique, not null, ref: > users.id]
+  student_code varchar(20) [unique, not null]
+  date_of_birth date
+  department varchar(100)
+  academic_year varchar(10)
+  is_verified boolean [default: false]
+  created_at timestamptz [default: `now()`]
+  updated_at timestamptz [default: `now()`]
+}
+
+/* Model configs */
+Table model_configs {
+  id integer [pk, increment]
+  config_name varchar(100) [unique, not null]
+  face_detection_confidence float [default: 0.7]
+  face_detection_iou float [default: 0.45]
+  face_recognition_threshold float [default: 0.6]
+  is_active boolean [default: true]
+  created_by integer [ref: > admins.id]
+  created_at timestamptz [default: `now()`]
+  updated_at timestamptz [default: `now()`]
+}
+
+/* Face embeddings (pgvector) */
+Table face_embeddings {
+  id integer [pk, increment]
+  student_id integer [not null, ref: > students.id]
+  image_path varchar(255) [not null]
+  embedding vector(512) [not null] // Requires pgvector extension
+  status embedding_status [not null, default: 'pending']
+  rejection_reason text
+  uploaded_at timestamptz [default: `now()`]
+  reviewed_at timestamptz
+  created_at timestamptz [default: `now()`]
+  updated_at timestamptz [default: `now()`]
+}
+
+/* Classes */
+Table classes {
+  id integer [pk, increment]
+  class_name varchar(255) [not null]
+  class_code varchar(10) [unique, not null]
+  teacher_id integer [not null, ref: > teachers.id]
+  description jsonb
+  is_active boolean [default: true]
+  created_at timestamptz [default: `now()`]
+  updated_at timestamptz [default: `now()`]
+}
+
+/* Class schedules (normalized schedule instead of array in JSON) */
+Table class_schedules {
+  id integer [pk, increment]
+  class_id integer [not null, ref: > classes.id]
+  day_of_week smallint [not null] // 0=Sun..6=Sat or 1..7 per app convention
+  start_time time [not null]
+  end_time time [not null]
+  location varchar(255)
+  created_at timestamptz [default: `now()`]
+  updated_at timestamptz [default: `now()`]
+  Indexes {
+    (class_id, day_of_week)
+  }
+}
+
+/* Class members (enrollments) */
+Table class_members {
+  id integer [pk, increment]
+  class_id integer [not null, ref: > classes.id]
+  student_id integer [not null, ref: > students.id]
+  joined_at timestamptz [default: `now()`]
+  created_at timestamptz [default: `now()`]
+  updated_at timestamptz [default: `now()`]
+  Indexes {
+    (class_id, student_id) [unique]
+  }
+}
+
+/* Attendance sessions */
+Table attendance_sessions {
+  id integer [pk, increment]
+  class_id integer [not null, ref: > classes.id]
+  session_name varchar(255)
+  start_time timestamptz [not null]
+  end_time timestamptz
+  status session_status [not null, default: 'scheduled']
+  qr_code text
+  allow_late_checkin boolean [default: true]
+  late_threshold_minutes integer [default: 15]
+  location varchar(255)
+  created_at timestamptz [default: `now()`]
+  updated_at timestamptz [default: `now()`]
+  Indexes {
+    class_id
+    status
+  }
+}
+
+/* Attendance records */
+Table attendance_records {
+  id integer [pk, increment]
+  session_id integer [not null, ref: > attendance_sessions.id]
+  student_id integer [not null, ref: > students.id]
+  status attendance_status [not null, default: 'absent']
+  image_path varchar(255)
+  confidence_score float
+  recorded_at timestamptz [default: `now()`]
+  notes varchar(255)
+  created_at timestamptz [default: `now()`]
+  updated_at timestamptz [default: `now()`]
+  Indexes {
+    (session_id, student_id) [unique]
+    recorded_at
+  }
+}
+
+/* Attendance images (multiple captures per record) */
+Table attendance_images {
+  id integer [pk, increment]
+  attendance_record_id integer [ref: > attendance_records.id]
+  file_id integer [ref: > files.id]
+  captured_at timestamptz [default: `now()`]
+}
+
+/* Files / uploads */
+Table files {
+  id integer [pk, increment]
+  uploader_id integer [ref: > users.id]
+  filename varchar(255) [not null]
+  url text [not null]
+  original_name varchar(255)
+  mime_type varchar(100)
+  size integer
+  category varchar(50) // e.g. 'avatar','face_image','leave_evidence'
+  created_at timestamptz [default: `now()`]
+}
+
+/* Leave requests */
+Table leave_requests {
+  id integer [pk, increment]
+  student_id integer [not null, ref: > students.id]
+  class_id integer [not null, ref: > classes.id]
+  reason text [not null]
+  leave_dates jsonb [not null] // [{date, reason}]
+  evidence_file_id integer [ref: > files.id]
+  status request_status [not null, default: 'pending']
+  reviewed_by integer [ref: > users.id]
+  review_notes text
+  reviewed_at timestamptz
+  created_at timestamptz [default: `now()`]
+  updated_at timestamptz [default: `now()`]
+}
+
+/* Refresh tokens */
+Table refresh_tokens {
+  id integer [pk, increment]
+  user_id integer [not null, ref: > users.id]
+  token varchar(255) [unique, not null]
+  expires_at timestamptz [not null]
+  created_at timestamptz [default: `now()`]
+  revoked_at timestamptz
+}
+
+/* System logs */
+Table system_logs {
+  id integer [pk, increment]
+  user_id integer [ref: > users.id]
+  action varchar(100) [not null]
+  details jsonb
+  created_at timestamptz [default: `now()`]
+  updated_at timestamptz [default: `now()`]
+}
+
+/* Face registration workflow */
+Table face_registration_requests {
+  id integer [pk, increment]
+  student_id integer [not null, ref: > students.id]
+  status embedding_status [default: 'pending']
+  evidence_file_id integer [ref: > files.id]
+  note text
+  created_at timestamptz [default: `now()`]
+  reviewed_at timestamptz
+  reviewed_by integer [ref: > users.id]
+}
+
+Table face_models {
+  id integer [pk, increment]
+  student_id integer [not null, ref: > students.id]
+  model_path text [not null]
+  vector_dim integer
+  accuracy float
+  images_count integer
+  created_at timestamptz [default: `now()`]
+}
+
+/* AI training / jobs */
+Table ai_training_jobs {
+  id integer [pk, increment]
+  config_id integer [ref: > model_configs.id]
+  status varchar(50) [default: 'started']
+  started_at timestamptz
+  finished_at timestamptz
+  logs jsonb
+  created_at timestamptz [default: `now()`]
+}
+
+/* Notes:
+  - DBML doesn't support 'on delete' syntax used earlier; handle FK cascade in SQL migrations.
+  - To enable pgvector: CREATE EXTENSION IF NOT EXISTS vector;
+  - Add SQL migration to set ON DELETE CASCADE where needed, e.g.:
+    ALTER TABLE class_schedules
+      ADD CONSTRAINT fk_class FOREIGN KEY (class_id) REFERENCES classes(id) ON DELETE CASCADE;
+*/
