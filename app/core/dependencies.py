@@ -1,86 +1,76 @@
-"""Common dependencies for FastAPI routes."""
-from typing import Generator, Optional
+"""Dependencies for FastAPI endpoints."""
 from fastapi import Depends, HTTPException, status
-from fastapi.security import OAuth2PasswordBearer
+from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from sqlalchemy.orm import Session
-from app.database.session import SessionLocal
+from typing import Optional
+
+from app.core.database import get_db
 from app.core.security import decode_token
+from app.models.user import User
+
+security = HTTPBearer()
 
 
-# OAuth2 scheme for token authentication
-oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/v1/auth/login")
-
-
-def get_db() -> Generator[Session, None, None]:
-    """
-    Dependency to get database session.
-    
-    Yields:
-        Session: SQLAlchemy database session
-    """
-    db = SessionLocal()
-    try:
-        yield db
-    finally:
-        db.close()
-
-
-def get_current_user(
-    token: str = Depends(oauth2_scheme),
+async def get_current_user(
+    credentials: HTTPAuthorizationCredentials = Depends(security),
     db: Session = Depends(get_db)
-):
-    """
-    Dependency to get current authenticated user.
+) -> User:
+    """Get current authenticated user from JWT token."""
     
-    Args:
-        token: JWT token from request header
-        db: Database session
-        
-    Returns:
-        User object
-        
-    Raises:
-        HTTPException: If token is invalid or user not found
-    """
-    credentials_exception = HTTPException(
-        status_code=status.HTTP_401_UNAUTHORIZED,
-        detail="Could not validate credentials",
-        headers={"WWW-Authenticate": "Bearer"},
-    )
-    
+    token = credentials.credentials
     payload = decode_token(token)
-    if payload is None:
-        raise credentials_exception
     
-    user_id: Optional[int] = payload.get("sub")
-    if user_id is None:
-        raise credentials_exception
+    if not payload:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid or expired token",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
     
-    # TODO: Get user from database
-    # from app.repositories.user_repository import UserRepository
-    # user_repo = UserRepository(db)
-    # user = user_repo.get(user_id)
-    # if user is None:
-    #     raise credentials_exception
-    # return user
+    user_id = payload.get("user_id")
+    if not user_id:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid token payload",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
     
-    return {"id": user_id}  # Placeholder
+    user = db.query(User).filter(User.id == user_id).first()
+    if not user:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="User not found",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+    
+    if not user.is_active:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="User account is deactivated"
+        )
+    
+    return user
 
 
-def get_current_active_user(current_user = Depends(get_current_user)):
-    """
-    Dependency to get current active user.
-    
-    Args:
-        current_user: Current authenticated user
-        
-    Returns:
-        User object
-        
-    Raises:
-        HTTPException: If user is not active
-    """
-    # TODO: Check if user is active
-    # if not current_user.is_active:
-    #     raise HTTPException(status_code=400, detail="Inactive user")
+async def get_current_active_user(
+    current_user: User = Depends(get_current_user)
+) -> User:
+    """Get current active user."""
+    if not current_user.is_active:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Inactive user"
+        )
     return current_user
+
+
+async def require_role(required_roles: list[str]):
+    """Dependency to check user role."""
+    async def role_checker(current_user: User = Depends(get_current_user)):
+        if current_user.role not in required_roles:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail=f"Access denied. Required roles: {required_roles}"
+            )
+        return current_user
+    return role_checker
