@@ -71,6 +71,7 @@ class AuthService:
                 user_id=new_user.id,
                 teacher_code=request.teacher_code,
                 department=request.department,
+                specialization=request.specialization,
             )
             db.add(teacher)
         elif request.role == "student":
@@ -79,6 +80,7 @@ class AuthService:
                 student_code=request.student_code,
                 major=request.major,
                 academic_year=request.academic_year,
+                date_of_birth=request.date_of_birth,
             )
             db.add(student)
         
@@ -256,5 +258,5 @@ class AuthService:
                 user_data["student_code"] = student.student_code
                 user_data["major"] = student.major
                 user_data["academic_year"] = student.academic_year
-        
+                user_data["date_of_birth"] = student.date_of_birth.isoformat() if student.date_of_birth else None
         return user_data

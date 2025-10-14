@@ -1147,80 +1147,113 @@ Authorization: Bearer {accessToken}
     "Authorization": "Bearer {accessToken}"
   },
   "queryParams": {
-    "status": "active|inactive",
-    "department": "string",
-    "search": "string",
-    "page": "number",
-    "limit": "number"
+    "search": "string (Search by name, email, or teacher code)",
+    "department": "string (Filter by department)",
+    "is_active": "boolean (Filter by active status)",
+    "page": "number (Page number, starts from 1)",
+    "limit": "number (Items per page, max 100)"
   },
   "response": {
-    "success": true,
-    "data": {
-      "teachers": [
-        {
-          "id": "string",
-          "username": "teacher01",
-          "fullName": "Dr. Nguyen Van A",
-          "email": "teacher@example.com",
-          "phone": "+84123456789",
-          "department": "Computer Science",
-          "status": "active|inactive",
-          "avatar": "string",
-          "joinDate": "2024-01-15",
-          "totalClasses": 6,
-          "totalStudents": 150,
-          "lastLogin": "2024-10-15T08:30:00Z",
-          "createdAt": "string",
-          "updatedAt": "string"
-        }
-      ],
-      "stats": {
-        "total": 15,
-        "active": 12,
-        "inactive": 3
-      },
-      "pagination": {
-        "page": 1,
-        "limit": 10,
-        "total": 15,
-        "totalPages": 2
+    "total": 15,
+    "page": 1,
+    "page_size": 10,
+    "total_pages": 2,
+    "data": [
+      {
+        "id": 1,
+        "user_id": 3,
+        "teacher_code": "GV001",
+        "department": "Computer Science",
+        "specialization": "Artificial Intelligence",
+        "created_at": "2025-10-13T13:49:53.772800",
+        "updated_at": "2025-10-13T13:49:53.772800",
+        "full_name": "Dr. Nguyen Van A",
+        "email": "teacher1@example.com",
+        "phone": "0123456789",
+        "avatar_url": null,
+        "is_active": true
       }
+    ],
+    "stats": {
+      "total": 15,
+      "active": 12,
+      "inactive": 3
     }
+  },
+  "errorResponse": {
+    "detail": "Access denied. Admin role required."
   }
 }
 ```
 
-### Create Teacher
+### Get Teacher by ID
 ```json
 {
-  "endpoint": "/admin/teachers",
+  "endpoint": "/admin/teachers/{teacher_id}",
+  "method": "GET",
+  "headers": {
+    "Authorization": "Bearer {accessToken}"
+  },
+  "response": {
+    "teacher": {
+      "id": 1,
+      "user_id": 3,
+      "teacher_code": "GV001",
+      "department": "Computer Science",
+      "specialization": "Artificial Intelligence",
+      "created_at": "2025-10-13T13:49:53.772800",
+      "updated_at": "2025-10-13T13:49:53.772800",
+      "full_name": "Dr. Nguyen Van A",
+      "email": "teacher1@example.com",
+      "phone": "0123456789",
+      "avatar_url": null,
+      "is_active": true
+    }
+  },
+  "errorResponse": {
+    "detail": "Teacher not found"
+  }
+}
+```
+
+### Create Teacher (via Auth Register)
+```json
+{
+  "endpoint": "/auth/register",
   "method": "POST",
   "headers": {
-    "Authorization": "Bearer {accessToken}",
     "Content-Type": "application/json"
   },
   "body": {
-    "username": "teacher01",
-    "fullName": "Dr. Nguyen Van A",
     "email": "teacher@example.com",
-    "phone": "+84123456789",
+    "full_name": "Dr. Nguyen Van A",
+    "password": "Test123456",
+    "phone": "0987654321",
+    "role": "teacher",
+    "teacher_code": "GV001",
     "department": "Computer Science",
-    "password": "string"
+    "specialization": "Artificial Intelligence"
   },
   "response": {
-    "success": true,
-    "data": {
-      "teacher": {
-        "id": "string",
-        "username": "teacher01",
-        "fullName": "Dr. Nguyen Van A",
-        "email": "teacher@example.com",
-        "department": "Computer Science",
-        "status": "active",
-        "createdAt": "string"
-      }
+    "user": {
+      "id": 3,
+      "full_name": "Dr. Nguyen Van A",
+      "email": "teacher@example.com",
+      "role": "teacher",
+      "is_active": true,
+      "avatar_url": null,
+      "phone": "0987654321",
+      "is_verified": false,
+      "created_at": "2025-10-13T13:49:53.772800",
+      "teacher_code": "GV001",
+      "department": "Computer Science"
     },
-    "message": "Teacher created successfully"
+    "access_token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...",
+    "refresh_token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...",
+    "token_type": "bearer"
+  },
+  "errorResponse": {
+    "detail": "Email already registered"
   }
 }
 ```
@@ -1228,30 +1261,37 @@ Authorization: Bearer {accessToken}
 ### Update Teacher
 ```json
 {
-  "endpoint": "/admin/teachers/{teacherId}",
+  "endpoint": "/admin/teachers/{teacher_id}",
   "method": "PUT",
   "headers": {
     "Authorization": "Bearer {accessToken}",
     "Content-Type": "application/json"
   },
   "body": {
-    "fullName": "Dr. Nguyen Van A",
-    "email": "teacher@example.com",
-    "phone": "+84123456789",
-    "department": "Computer Science",
-    "status": "active|inactive"
+    "department": "Software Engineering",
+    "specialization": "Machine Learning",
+    "phone": "0123456789",
+    "is_active": true
   },
   "response": {
-    "success": true,
-    "data": {
-      "teacher": {
-        "id": "string",
-        "fullName": "Dr. Nguyen Van A",
-        "email": "teacher@example.com",
-        "updatedAt": "string"
-      }
-    },
-    "message": "Teacher updated successfully"
+    "message": "Teacher updated successfully",
+    "teacher": {
+      "id": 1,
+      "user_id": 3,
+      "teacher_code": "GV001",
+      "department": "Software Engineering",
+      "specialization": "Machine Learning",
+      "created_at": "2025-10-13T13:49:53.772800",
+      "updated_at": "2025-10-13T15:30:00.000000",
+      "full_name": "Dr. Nguyen Van A",
+      "email": "teacher1@example.com",
+      "phone": "0123456789",
+      "avatar_url": null,
+      "is_active": true
+    }
+  },
+  "errorResponse": {
+    "detail": "Teacher not found"
   }
 }
 ```
@@ -1259,22 +1299,18 @@ Authorization: Bearer {accessToken}
 ### Delete Teacher
 ```json
 {
-  "endpoint": "/admin/teachers/{teacherId}",
+  "endpoint": "/admin/teachers/{teacher_id}",
   "method": "DELETE",
   "headers": {
     "Authorization": "Bearer {accessToken}"
   },
   "response": {
-    "success": true,
-    "message": "Teacher deleted successfully"
+    "message": "Teacher deactivated successfully"
   },
   "errorResponse": {
-    "success": false,
-    "error": {
-      "code": "TEACHER_HAS_CLASSES",
-      "message": "Cannot delete teacher who has active classes"
-    }
-  }
+    "detail": "Teacher not found"
+  },
+  "note": "This is a soft delete - the teacher's is_active status is set to false"
 }
 ```
 
@@ -1287,83 +1323,124 @@ Authorization: Bearer {accessToken}
     "Authorization": "Bearer {accessToken}"
   },
   "queryParams": {
-    "status": "active|inactive",
-    "class": "string",
-    "search": "string",
-    "page": "number",
-    "limit": "number"
+    "search": "string (Search by name, email, or student code)",
+    "major": "string (Filter by major)",
+    "academic_year": "string (Filter by academic year, e.g., 2021)",
+    "is_active": "boolean (Filter by active status)",
+    "is_verified": "boolean (Filter by verification status)",
+    "page": "number (Page number, starts from 1)",
+    "limit": "number (Items per page, max 100)"
   },
   "response": {
-    "success": true,
-    "data": {
-      "students": [
-        {
-          "id": "string",
-          "username": "student01",
-          "fullName": "Nguyen Van A",
-          "email": "student@example.com",
-          "studentCode": "2021001",
-          "class": "IT2021",
-          "status": "active|inactive",
-          "avatar": "string",
-          "enrollDate": "2024-01-15",
-          "totalClasses": 4,
-          "attendanceRate": 95.5,
-          "lastLogin": "2024-10-15T08:30:00Z",
-          "hasFaceRegistered": true,
-          "createdAt": "string",
-          "updatedAt": "string"
-        }
-      ],
-      "stats": {
-        "total": 250,
-        "active": 240,
-        "inactive": 10,
-        "withFaceRegistered": 200
-      },
-      "pagination": {
-        "page": 1,
-        "limit": 10,
-        "total": 250,
-        "totalPages": 25
+    "total": 250,
+    "page": 1,
+    "page_size": 10,
+    "total_pages": 25,
+    "data": [
+      {
+        "id": 1,
+        "user_id": 1,
+        "student_code": "SV001",
+        "date_of_birth": "2003-05-15",
+        "major": "Information Technology",
+        "academic_year": "2021",
+        "is_verified": true,
+        "created_at": "2025-10-12T14:09:08.098512",
+        "updated_at": "2025-10-12T14:09:08.098512",
+        "full_name": "Nguyen Van A",
+        "email": "student1@example.com",
+        "phone": "0123456789",
+        "avatar_url": null,
+        "is_active": true
       }
+    ],
+    "stats": {
+      "total": 250,
+      "active": 240,
+      "inactive": 10,
+      "verified": 200,
+      "unverified": 50
     }
+  },
+  "errorResponse": {
+    "detail": "Access denied. Admin role required."
   }
 }
 ```
 
-### Create Student
+### Get Student by ID
 ```json
 {
-  "endpoint": "/admin/students",
+  "endpoint": "/admin/students/{student_id}",
+  "method": "GET",
+  "headers": {
+    "Authorization": "Bearer {accessToken}"
+  },
+  "response": {
+    "student": {
+      "id": 1,
+      "user_id": 1,
+      "student_code": "SV001",
+      "date_of_birth": "2003-05-15",
+      "major": "Information Technology",
+      "academic_year": "2021",
+      "is_verified": true,
+      "created_at": "2025-10-12T14:09:08.098512",
+      "updated_at": "2025-10-12T14:09:08.098512",
+      "full_name": "Nguyen Van A",
+      "email": "student1@example.com",
+      "phone": "0123456789",
+      "avatar_url": null,
+      "is_active": true
+    }
+  },
+  "errorResponse": {
+    "detail": "Student not found"
+  }
+}
+```
+
+### Create Student (via Auth Register)
+```json
+{
+  "endpoint": "/auth/register",
   "method": "POST",
   "headers": {
-    "Authorization": "Bearer {accessToken}",
     "Content-Type": "application/json"
   },
   "body": {
-    "username": "student01",
-    "fullName": "Nguyen Van A",
     "email": "student@example.com",
-    "studentCode": "2021001",
-    "class": "IT2021",
-    "password": "string"
+    "full_name": "Nguyen Van A",
+    "password": "Test123456",
+    "phone": "0987654321",
+    "role": "student",
+    "student_code": "SV001",
+    "major": "Information Technology",
+    "academic_year": "2021",
+    "date_of_birth": "2003-05-15"
   },
   "response": {
-    "success": true,
-    "data": {
-      "student": {
-        "id": "string",
-        "username": "student01",
-        "fullName": "Nguyen Van A",
-        "email": "student@example.com",
-        "studentCode": "2021001",
-        "class": "IT2021",
-        "status": "active",
-        "createdAt": "string"
-      }
+    "user": {
+      "id": 1,
+      "full_name": "Nguyen Van A",
+      "email": "student@example.com",
+      "role": "student",
+      "is_active": true,
+      "avatar_url": null,
+      "phone": "0987654321",
+      "is_verified": false,
+      "created_at": "2025-10-12T14:09:08.098512",
+      "student_code": "SV001",
+      "major": "Information Technology",
+      "academic_year": "2021",
+      "date_of_birth": "2003-05-15"
     },
-    "message": "Student created successfully"
+    "access_token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...",
+    "refresh_token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...",
+    "token_type": "bearer"
+  },
+  "errorResponse": {
+    "detail": "Email already registered"
   }
 }
 ```
@@ -1371,30 +1448,41 @@ Authorization: Bearer {accessToken}
 ### Update Student
 ```json
 {
-  "endpoint": "/admin/students/{studentId}",
+  "endpoint": "/admin/students/{student_id}",
   "method": "PUT",
   "headers": {
     "Authorization": "Bearer {accessToken}",
     "Content-Type": "application/json"
   },
   "body": {
-    "fullName": "Nguyen Van A",
-    "email": "student@example.com",
-    "studentCode": "2021001",
-    "class": "IT2021",
-    "status": "active|inactive"
+    "major": "Computer Science",
+    "academic_year": "2022",
+    "date_of_birth": "2003-06-20",
+    "phone": "0123456789",
+    "is_active": true,
+    "is_verified": true
   },
   "response": {
-    "success": true,
-    "data": {
-      "student": {
-        "id": "string",
-        "fullName": "Nguyen Van A",
-        "email": "student@example.com",
-        "updatedAt": "string"
-      }
-    },
-    "message": "Student updated successfully"
+    "message": "Student updated successfully",
+    "student": {
+      "id": 1,
+      "user_id": 1,
+      "student_code": "SV001",
+      "date_of_birth": "2003-06-20",
+      "major": "Computer Science",
+      "academic_year": "2022",
+      "is_verified": true,
+      "created_at": "2025-10-12T14:09:08.098512",
+      "updated_at": "2025-10-13T15:30:00.000000",
+      "full_name": "Nguyen Van A",
+      "email": "student1@example.com",
+      "phone": "0123456789",
+      "avatar_url": null,
+      "is_active": true
+    }
+  },
+  "errorResponse": {
+    "detail": "Student not found"
   }
 }
 ```
@@ -1402,15 +1490,18 @@ Authorization: Bearer {accessToken}
 ### Delete Student
 ```json
 {
-  "endpoint": "/admin/students/{studentId}",
+  "endpoint": "/admin/students/{student_id}",
   "method": "DELETE",
   "headers": {
     "Authorization": "Bearer {accessToken}"
   },
   "response": {
-    "success": true,
-    "message": "Student deleted successfully"
-  }
+    "message": "Student deactivated successfully"
+  },
+  "errorResponse": {
+    "detail": "Student not found"
+  },
+  "note": "This is a soft delete - the student's is_active status is set to false"
 }
 ```
 

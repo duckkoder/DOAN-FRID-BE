@@ -1,5 +1,5 @@
 """File model - Manages uploaded files in the system."""
-from sqlalchemy import Column, Integer, String, Text, ForeignKey
+from sqlalchemy import Column, Integer, String, Text, ForeignKey, Boolean
 from sqlalchemy.orm import relationship
 from app.models.base import BaseModel
 
@@ -10,9 +10,14 @@ class File(BaseModel):
     __tablename__ = "files"
     
     uploader_id = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
-    filename = Column(String(255), nullable=False)
-    url = Column(Text, nullable=False)
-    original_name = Column(String(255), nullable=True)
+    
+    # S3 Storage
+    file_key = Column(String(500), nullable=False)  # S3 key: "public/avatars/abc123.jpg"
+    is_public = Column(Boolean, default=False)  # True if in public/ folder
+    
+    # File metadata
+    filename = Column(String(255), nullable=False)  # Generated filename
+    original_name = Column(String(255), nullable=True)  # User's original filename
     mime_type = Column(String(100), nullable=True)
     size = Column(Integer, nullable=True)
     category = Column(String(50), nullable=True)  # avatar, face_image, leave_evidence, etc.
