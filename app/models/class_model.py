@@ -1,5 +1,5 @@
 """Class model - Represents a course/class taught by a teacher."""
-from sqlalchemy import Column, Integer, String, Boolean, ForeignKey, JSON
+from sqlalchemy import Column, Integer, String, Boolean, ForeignKey
 from sqlalchemy.orm import relationship
 from app.models.base import BaseModel
 
@@ -12,8 +12,9 @@ class Class(BaseModel):
     class_name = Column(String(255), nullable=False)
     class_code = Column(String(10), unique=True, nullable=False, index=True)
     teacher_id = Column(Integer, ForeignKey("teachers.id", ondelete="CASCADE"), nullable=False)
-    description = Column(JSON, nullable=True)
+    description = Column(String(255), nullable=True)
     is_active = Column(Boolean, default=True)
+    location = Column(String(255), nullable=True)
     
     # Relationships
     teacher = relationship("Teacher", back_populates="classes")

@@ -615,13 +615,19 @@ Authorization: Bearer {accessToken}
       "pendingRequests": 3,
       "recentClasses": [
         {
-          "id": "string",
+          "id": 1,
           "subject": "Advanced Java Programming",
-          "time": "07:30 - 09:30",
+          "name": "Java Programming Advanced",
           "room": "LAB-101",
-          "status": "upcoming|ongoing|completed|cancelled",
+          "status": "active",
           "studentCount": 25,
-          "date": "2024-10-15"
+          "classCode": "JAVA202410",
+          "schedule": {
+            "monday": ["1-3"],
+            "wednesday": ["1-3"],
+            "friday": ["4-6"]
+          },
+          "createdAt": "2024-10-15T08:30:00Z"
         }
       ],
       "notifications": [
@@ -652,36 +658,30 @@ Authorization: Bearer {accessToken}
     "Authorization": "Bearer {accessToken}"
   },
   "queryParams": {
-    "status": "upcoming|ongoing|completed|cancelled",
+    "status": "active|inactive",
     "date": "2024-10-15",
-    "page": "number",
-    "limit": "number"
+    "page": 1,
+    "limit": 10
   },
   "response": {
     "success": true,
     "data": {
       "classes": [
         {
-          "id": "string",
+          "id": 1,
           "subject": "Advanced Java Programming",
           "name": "Java Programming Advanced",
-          "time": "07:30 - 09:30",
-          "duration": "120",
-          "room": "LAB-101",
+          "location": "LAB-101",
+          "status": "active",
+          "classCode": "JAVA202410",
           "studentCount": 25,
-          "maxStudents": 30,
-          "status": "upcoming|ongoing|completed|cancelled",
-          "day": 1,
-          "classCode": "JAVA2024",
-          "startDate": "2024-01-15",
-          "endDate": "2024-05-15",
           "schedule": {
-            "monday": ["Buổi 1 (7:30 - 9:30)", "Buổi 2 (9:45 - 11:45)"],
-            "wednesday": ["Buổi 1 (7:30 - 9:30)", "Buổi 2 (9:45 - 11:45)"],
-            "friday": ["Buổi 1 (7:30 - 9:30)", "Buổi 2 (9:45 - 11:45)"]
+            "monday": ["1-3", "6-9"],
+            "wednesday": ["1-3"],
+            "friday": ["4-6"]
           },
-          "createdAt": "string",
-          "updatedAt": "string"
+          "createdAt": "2024-10-15T08:30:00Z",
+          "updatedAt": "2024-10-15T08:30:00Z"
         }
       ],
       "pagination": {
@@ -705,33 +705,34 @@ Authorization: Bearer {accessToken}
     "Content-Type": "application/json"
   },
   "body": {
-    "subject": "Advanced Java Programming",
-    "name": "Java Programming Advanced",
-    "time": "07:30 - 09:30",
-    "duration": "120",
-    "room": "LAB-101",
+    "class_name": "Java Programming Advanced",
+    "location": "LAB-101",
     "maxStudents": 30,
-    "day": 1,
-    "startDate": "2024-01-15",
-    "endDate": "2024-05-15",
+    "teacher_id": "TC001",
     "description": "Advanced Java Programming Course",
     "schedule": {
-      "monday": ["Buổi 1 (7:30 - 9:30)", "Buổi 2 (9:45 - 11:45)"],
-      "wednesday": ["Buổi 1 (7:30 - 9:30)", "Buổi 2 (9:45 - 11:45)"],
-      "friday": ["Buổi 1 (7:30 - 9:30)", "Buổi 2 (9:45 - 11:45)"]
+      "monday": ["1-3", "6-9"],
+      "wednesday": ["1-3"],
+      "friday": ["4-6"]
     }
   },
   "response": {
     "success": true,
     "data": {
       "class": {
-        "id": "string",
+        "id": 1,
         "subject": "Advanced Java Programming",
-        "classCode": "JAVA2024",
-        "createdAt": "string"
+        "classCode": "JAVA202410",
+        "createdAt": "2024-10-15T08:30:00Z"
       }
     },
     "message": "Class created successfully"
+  },
+  "notes": {
+    "schedule_format": "Period ranges: '1-3' means periods 1 to 3 (e.g., 07:30-09:30)",
+    "day": "0=Monday, 1=Tuesday, ..., 6=Sunday",
+    "duration": "In minutes",
+    "status": "active (is_active=true) or inactive (is_active=false)"
   }
 }
 ```
@@ -748,41 +749,97 @@ Authorization: Bearer {accessToken}
     "success": true,
     "data": {
       "class": {
-        "id": "string",
+        "id": 1,
         "subject": "Advanced Java Programming",
         "name": "Java Programming Advanced",
         "teacher": "Dr. Nguyen Van A",
-        "teacherId": "string",
+        "teacherId": 1,
         "students": 25,
         "maxStudents": 30,
-        "schedule": "Mon, Wed, Fri - 07:30-09:30",
+        "schedule": "Monday, Wednesday, Friday",
         "room": "LAB-101",
         "status": "active",
-        "classCode": "JAVA2024",
-        "startDate": "2024-01-15",
-        "endDate": "2024-05-15",
+        "classCode": "JAVA202410",
         "description": "Advanced Java Programming Course"
       },
       "students": [
         {
-          "id": "string",
-          "studentId": "2021001",
+          "id": 1,
+          "studentId": "SV001",
           "fullName": "Nguyen Van A",
           "email": "student@example.com",
-          "attendanceRate": 90,
+          "attendanceRate": 90.0,
           "totalSessions": 20,
           "presentCount": 18,
           "absentCount": 1,
           "lateCount": 1,
-          "joinedAt": "string"
+          "joinedAt": "2024-01-15T08:30:00Z"
         }
       ],
       "attendanceStats": {
         "totalSessions": 20,
-        "averageAttendance": 85,
+        "averageAttendance": 85.0,
         "totalStudents": 25
       }
     }
+  },
+  "notes": {
+    "studentId": "student_code from students table",
+    "schedule": "Human readable format (e.g., 'Monday, Wednesday, Friday')",
+    "status": "active or inactive based on is_active field in Class model"
+  }
+}
+```
+
+### Update Class (Optional - chưa implement)
+```json
+{
+  "endpoint": "/teacher/classes/{classId}",
+  "method": "PUT",
+  "headers": {
+    "Authorization": "Bearer {accessToken}",
+    "Content-Type": "application/json"
+  },
+  "body": {
+    "name": "Java Programming Advanced - Updated",
+    "room": "LAB-102",
+    "maxStudents": 35,
+    "description": "Updated description",
+    "schedule": {
+      "monday": ["1-3"],
+      "wednesday": ["1-3"],
+      "friday": ["4-6"]
+    }
+  },
+  "response": {
+    "success": true,
+    "data": {
+      "class": {
+        "id": 1,
+        "name": "Java Programming Advanced - Updated",
+        "updatedAt": "2024-10-15T08:30:00Z"
+      }
+    },
+    "message": "Class updated successfully"
+  }
+}
+```
+
+### Delete/Deactivate Class (Optional - chưa implement)
+```json
+{
+  "endpoint": "/teacher/classes/{classId}",
+  "method": "DELETE",
+  "headers": {
+    "Authorization": "Bearer {accessToken}"
+  },
+  "response": {
+    "success": true,
+    "message": "Class deactivated successfully"
+  },
+  "notes": {
+    "behavior": "Sets is_active=False instead of deleting from database",
+    "cascade": "Related schedules and members remain in database"
   }
 }
 ```
