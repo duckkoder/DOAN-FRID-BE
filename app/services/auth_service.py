@@ -248,13 +248,16 @@ class AuthService:
         if user.role == "teacher":
             teacher = db.query(Teacher).filter(Teacher.user_id == user.id).first()
             if teacher:
+                user_data["teacher_id"] = teacher.id
                 user_data["teacher_code"] = teacher.teacher_code
                 user_data["department"] = teacher.department
         elif user.role == "student":
             student = db.query(Student).filter(Student.user_id == user.id).first()
             if student:
+                user_data["student_id"] = student.id
                 user_data["student_code"] = student.student_code
                 user_data["major"] = student.major
                 user_data["academic_year"] = student.academic_year
-        
+        print(user_data)
         return user_data
+    

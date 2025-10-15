@@ -65,8 +65,11 @@ class UserResponse(BaseModel):
     created_at: datetime
     
     # Role-specific info
+    teacher_id: Optional[int] = None
     teacher_code: Optional[str] = None
     department: Optional[str] = None
+
+    student_id: Optional[int] = None
     student_code: Optional[str] = None
     major: Optional[str] = None
     academic_year: Optional[int] = None
