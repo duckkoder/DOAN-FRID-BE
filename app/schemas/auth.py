@@ -1,6 +1,6 @@
 from pydantic import BaseModel, EmailStr, Field, field_validator, model_validator
 from typing import Optional
-from datetime import datetime
+from datetime import datetime, date
 
 
 class RegisterRequest(BaseModel):
@@ -14,12 +14,12 @@ class RegisterRequest(BaseModel):
     # Teacher-specific
     teacher_code: Optional[str] = Field(None, max_length=50, description="Teacher code (required if role=teacher)")
     department: Optional[str] = Field(None, max_length=200, description="Department (optional for teacher)")
-    
+    specialization: Optional[str] = Field(None, max_length=100, description="Specialization (optional for teacher)")
     # Student-specific
     student_code: Optional[str] = Field(None, max_length=50, description="Student code (required if role=student)")
     major: Optional[str] = Field(None, max_length=200, description="Major (optional for student)")
     academic_year: Optional[int] = Field(None, ge=2000, le=2100, description="Academic year (optional for student)")
-    
+    date_of_birth: Optional[date] = Field(None, description="Date of birth (optional for student)")
     @field_validator('role')
     @classmethod
     def validate_role(cls, v):

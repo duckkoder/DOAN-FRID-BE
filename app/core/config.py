@@ -3,6 +3,7 @@ from pydantic_settings import BaseSettings
 from pydantic import Field
 from dotenv import load_dotenv
 import os
+from typing import Optional
 
 # ✅ Force load .env file
 env_path = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), '.env')
@@ -32,6 +33,36 @@ class Settings(BaseSettings):
     # File Upload
     UPLOAD_DIR: str = "uploads"
     MAX_UPLOAD_SIZE: int = 10 * 1024 * 1024  # 10MB
+    
+    # AWS S3
+    AWS_ACCESS_KEY_ID: str
+    AWS_SECRET_ACCESS_KEY: str
+    AWS_REGION: str = "ap-southeast-1"
+    AWS_S3_BUCKET_NAME: str
+    S3_PUBLIC_FOLDER: str = "public"
+    S3_PRIVATE_FOLDER: str = "private"
+    S3_TEMP_FOLDER: str = "temp"
+    
+    # File limits
+    MAX_FILE_SIZE_MB: int = 10
+    ALLOWED_IMAGE_EXTENSIONS: str = "jpg,jpeg,png,gif,webp"
+    ALLOWED_DOCUMENT_EXTENSIONS: str = "pdf,doc,docx,xls,xlsx"
+    
+    @property
+    def MAX_FILE_SIZE_BYTES(self) -> int:
+        return self.MAX_FILE_SIZE_MB * 1024 * 1024
+    
+    @property
+    def S3_BASE_URL(self) -> str:
+        return f"https://{self.AWS_S3_BUCKET_NAME}.s3.{self.AWS_REGION}.amazonaws.com"
+    
+    @property
+    def ALLOWED_IMAGE_EXTENSIONS_LIST(self) -> list:
+        return self.ALLOWED_IMAGE_EXTENSIONS.split(',')
+    
+    @property
+    def ALLOWED_DOCUMENT_EXTENSIONS_LIST(self) -> list:
+        return self.ALLOWED_DOCUMENT_EXTENSIONS.split(',')
 
     class Config:
         env_file = ".env"
