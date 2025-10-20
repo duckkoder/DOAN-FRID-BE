@@ -1,7 +1,8 @@
 """API v1 router aggregation."""
 from fastapi import APIRouter
 
-from app.api.v1 import teacherClassAPI
+from app.api.v1 import leaveRequestAPI, teacherClassAPI
+from app.api.v1 import studentClassAPI
 
 from app.api.v1 import auth, admin, files  # ✅ THÊM files
 
@@ -13,11 +14,13 @@ api_router = APIRouter()
 api_router.include_router(auth.router, tags=["Authentication"])
 
 # Include classAPI router
-api_router.include_router(teacherClassAPI.router, tags=["Classes"])
+api_router.include_router(teacherClassAPI.router, tags=["Teacher Classes"])
+api_router.include_router(studentClassAPI.router, tags=["Student Classes"])
 
 api_router.include_router(admin.router, tags=["Admin"])
 api_router.include_router(files.router, tags=["Files"])  # ✅ THÊM DÒNG NÀY
 
+api_router.include_router(leaveRequestAPI.router, tags=["Leave Requests"])  # ✅ THÊM DÒNG NÀY
 
 # TODO: Import and include other routers when created
 # from app.api.v1 import users, classes, attendance
