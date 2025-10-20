@@ -46,7 +46,7 @@ class Settings(BaseSettings):
     # File limits
     MAX_FILE_SIZE_MB: int = 10
     ALLOWED_IMAGE_EXTENSIONS: str = "jpg,jpeg,png,gif,webp"
-    ALLOWED_DOCUMENT_EXTENSIONS: str = "pdf,doc,docx,xls,xlsx"
+    ALLOWED_DOCUMENT_EXTENSIONS: str = "pdf,doc,docx,xls,xlsx,jpg,jpeg,png,gif,webp"
     
     @property
     def MAX_FILE_SIZE_BYTES(self) -> int:
