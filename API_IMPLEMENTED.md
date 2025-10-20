@@ -653,7 +653,7 @@ S3_BASE_URL=https://pbl6-bucket.s3.ap-southeast-1.amazonaws.com
 # File Upload Settings
 MAX_FILE_SIZE_MB=10
 ALLOWED_IMAGE_EXTENSIONS=jpg,jpeg,png,gif,webp
-ALLOWED_DOCUMENT_EXTENSIONS=pdf,doc,docx,txt,xlsx
+ALLOWED_DOCUMENT_EXTENSIONS=pdf,doc,docx,txt,xlsx,jpg,jpeg,png,gif,webp
 ```
 
 ### Security Features

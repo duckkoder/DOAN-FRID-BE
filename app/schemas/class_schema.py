@@ -132,6 +132,24 @@ class ClassResponse(BaseModel):
         "populate_by_name": True
     }
 
+class StudentClassResponse(BaseModel):
+    """Student class response."""
+    id: int
+    class_name: str = Field(..., alias="className")
+    class_code: str = Field(..., alias="classCode")
+    teacher_name: str = Field(..., alias="teacherName")
+    location: Optional[str] = None
+    description: Optional[str] = None
+    schedule: ScheduleModel = Field(..., alias="schedule")
+    is_active: bool = Field(..., alias="isActive")
+    created_at: datetime = Field(..., alias="createdAt")
+    updated_at: Optional[datetime] = Field(None, alias="updatedAt")
+
+    model_config = {
+        "from_attributes": True,
+        "populate_by_name": True
+    }    
+
 
 class CreateClassResponse(BaseModel):
     """Response for POST /teacher/classes."""
@@ -217,3 +235,37 @@ class GetClassDetailsResponse(BaseModel):
     """Response for GET /teacher/classes/{classId}."""
     success: bool = True
     data: Dict[str, Any]
+
+
+class GetStudentClassesListResponse(BaseModel):
+    """Response for GET /student/classes."""
+    success: bool = True
+    data: Dict[str, Any]
+
+
+class GetStudentClassDetailsResponse(BaseModel):
+    """Response for GET /student/classes/{classId}."""
+    success: bool = True
+    data: Dict[str, Any]
+
+
+class JoinClassRequest(BaseModel):
+    """Request to join a class using class code."""
+    class_code: str = Field(..., min_length=9, max_length=9, description="9-character class code")
+    
+    model_config = {
+        "json_schema_extra": {
+            "examples": [
+                {
+                    "class_code": "ABC123XYZ"
+                }
+            ]
+        }
+    }
+
+
+class JoinClassResponse(BaseModel):
+    """Response for POST /student/classes/join."""
+    success: bool = True
+    data: Dict[str, Any]
+    message: str = "Joined class successfully"
