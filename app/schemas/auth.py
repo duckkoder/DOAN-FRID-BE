@@ -13,8 +13,9 @@ class RegisterRequest(BaseModel):
     
     # Teacher-specific
     teacher_code: Optional[str] = Field(None, max_length=50, description="Teacher code (required if role=teacher)")
-    department: Optional[str] = Field(None, max_length=200, description="Department (optional for teacher)")
-    specialization: Optional[str] = Field(None, max_length=100, description="Specialization (optional for teacher)")
+    department_id: Optional[int] = Field(None, description="Department ID (optional for teacher)")
+    specialization_id: Optional[int] = Field(None, description="Specialization ID (optional for teacher)")
+    
     # Student-specific
     student_code: Optional[str] = Field(None, max_length=50, description="Student code (required if role=student)")
     major: Optional[str] = Field(None, max_length=200, description="Major (optional for student)")
@@ -46,6 +47,18 @@ class RegisterRequest(BaseModel):
                     "role": "student",
                     "phone": "0123456789",
                     "student_code": "SV001",
+                    "major": "Computer Science",
+                    "academic_year": 2024
+                },
+                {
+                    "full_name": "Teacher Name",
+                    "email": "teacher@example.com",
+                    "password": "password123",
+                    "role": "teacher",
+                    "phone": "0987654321",
+                    "teacher_code": "GV001",
+                    "department_id": 1,
+                    "specialization_id": 2
                 }
             ]
         }
@@ -67,7 +80,10 @@ class UserResponse(BaseModel):
     # Role-specific info
     teacher_id: Optional[int] = None
     teacher_code: Optional[str] = None
-    department: Optional[str] = None
+    department_id: Optional[int] = None
+    specialization_id: Optional[int] = None
+    department: Optional[str] = None  # Department name for display
+    specialization: Optional[str] = None  # Specialization name for display
 
     student_id: Optional[int] = None
     student_code: Optional[str] = None

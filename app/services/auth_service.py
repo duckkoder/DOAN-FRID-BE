@@ -17,6 +17,8 @@ from app.models.user import User
 from app.models.teacher import Teacher
 from app.models.student import Student
 from app.models.refresh_token import RefreshToken
+from app.models.department import Department
+from app.models.specialization import Specialization
 
 
 class AuthService:
@@ -53,6 +55,35 @@ class AuthService:
                     detail="Student code already exists"
                 )
         
+        # Validate department_id and specialization_id if provided (for teacher)
+        if request.role == "teacher":
+            if request.department_id:
+                department = db.query(Department).filter(
+                    Department.id == request.department_id
+                ).first()
+                if not department:
+                    raise HTTPException(
+                        status_code=status.HTTP_404_NOT_FOUND,
+                        detail=f"Department with id {request.department_id} not found"
+                    )
+            
+            if request.specialization_id:
+                specialization = db.query(Specialization).filter(
+                    Specialization.id == request.specialization_id
+                ).first()
+                if not specialization:
+                    raise HTTPException(
+                        status_code=status.HTTP_404_NOT_FOUND,
+                        detail=f"Specialization with id {request.specialization_id} not found"
+                    )
+                
+                # Validate specialization belongs to department if both are provided
+                if request.department_id and specialization.department_id != request.department_id:
+                    raise HTTPException(
+                        status_code=status.HTTP_400_BAD_REQUEST,
+                        detail=f"Specialization does not belong to the selected department"
+                    )
+        
         hashed_password = get_password_hash(request.password)
         new_user = User(
             full_name=request.full_name,
@@ -70,8 +101,8 @@ class AuthService:
             teacher = Teacher(
                 user_id=new_user.id,
                 teacher_code=request.teacher_code,
-                department=request.department,
-                specialization=request.specialization,
+                department_id=request.department_id,
+                specialization_id=request.specialization_id,
             )
             db.add(teacher)
         elif request.role == "student":
@@ -252,7 +283,22 @@ class AuthService:
             if teacher:
                 user_data["teacher_id"] = teacher.id
                 user_data["teacher_code"] = teacher.teacher_code
-                user_data["department"] = teacher.department
+                user_data["department_id"] = teacher.department_id
+                user_data["specialization_id"] = teacher.specialization_id
+                
+                # Include department and specialization names for convenience
+                if teacher.department_id:
+                    department = db.query(Department).filter(Department.id == teacher.department_id).first()
+                    user_data["department"] = department.name if department else None
+                else:
+                    user_data["department"] = None
+                    
+                if teacher.specialization_id:
+                    specialization = db.query(Specialization).filter(Specialization.id == teacher.specialization_id).first()
+                    user_data["specialization"] = specialization.name if specialization else None
+                else:
+                    user_data["specialization"] = None
+                    
         elif user.role == "student":
             student = db.query(Student).filter(Student.user_id == user.id).first()
             if student:
