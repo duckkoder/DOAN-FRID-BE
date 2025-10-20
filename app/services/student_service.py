@@ -217,7 +217,7 @@ class StudentService:
         for field, value in update_dict.items():
             if field in ['department_id', 'academic_year', 'date_of_birth', 'is_verified']:
                 setattr(student, field, value)
-            elif field in ['phone', 'is_active']:
+            elif field in ['phone', 'avatar_url', 'is_active']:
                 setattr(user, field, value)
         
         db.commit()

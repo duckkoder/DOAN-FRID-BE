@@ -91,6 +91,7 @@ class AuthService:
             password_hash=hashed_password,
             role=request.role,
             phone=request.phone,
+            avatar_url=request.avatar_url,
             is_active=True,
             is_verified=False,
         )

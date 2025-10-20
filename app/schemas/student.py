@@ -41,6 +41,7 @@ class StudentUpdateRequest(BaseModel):
     academic_year: Optional[str] = Field(None, max_length=10, description="Academic year")
     date_of_birth: Optional[date] = Field(None, description="Date of birth")
     phone: Optional[str] = Field(None, max_length=50, description="Phone number")
+    avatar_url: Optional[str] = Field(None, description="Avatar URL (S3)")
     is_active: Optional[bool] = Field(None, description="Active status")
     is_verified: Optional[bool] = Field(None, description="Verification status")
 

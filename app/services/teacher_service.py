@@ -230,7 +230,7 @@ class TeacherService:
         for field, value in update_dict.items():
             if field in ['department_id', 'specialization_id']:
                 setattr(teacher, field, value)
-            elif field in ['phone', 'is_active']:
+            elif field in ['phone', 'avatar_url', 'is_active']:
                 setattr(user, field, value)
         
         db.commit()

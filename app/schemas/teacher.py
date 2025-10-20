@@ -38,6 +38,7 @@ class TeacherUpdateRequest(BaseModel):
     department_id: Optional[int] = Field(None, description="Department ID")
     specialization_id: Optional[int] = Field(None, description="Specialization ID")
     phone: Optional[str] = Field(None, max_length=50, description="Phone number")
+    avatar_url: Optional[str] = Field(None, description="Avatar URL (S3)")
     is_active: Optional[bool] = Field(None, description="Active status")
 
 
