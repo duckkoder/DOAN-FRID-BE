@@ -137,7 +137,7 @@ async def delete_teacher(
 )
 async def get_students(
     search: Optional[str] = Query(None, description="Search by name, email, or student code"),
-    major: Optional[str] = Query(None, description="Filter by major"),
+    department: Optional[str] = Query(None, description="Filter by department name"),
     academic_year: Optional[str] = Query(None, description="Filter by academic year"),
     is_active: Optional[bool] = Query(None, description="Filter by active status"),
     is_verified: Optional[bool] = Query(None, description="Filter by verification status"),
@@ -150,7 +150,7 @@ async def get_students(
     Get list of students with pagination and filters.
     
     - **search**: Search by student name, email, or student code
-    - **major**: Filter by major/specialization
+    - **department**: Filter by department name
     - **academic_year**: Filter by academic year (e.g., "2021", "2022")
     - **is_active**: Filter by active status (true/false)
     - **is_verified**: Filter by verification status (true/false)
@@ -161,7 +161,7 @@ async def get_students(
     result = StudentService.get_student_list(
         db=db,
         search=search,
-        major=major,
+        department=department,
         academic_year=academic_year,
         is_active=is_active,
         is_verified=is_verified,

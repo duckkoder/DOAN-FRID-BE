@@ -7,7 +7,7 @@ from datetime import datetime, date
 class StudentBase(BaseModel):
     """Base student schema."""
     student_code: str = Field(..., max_length=20)
-    major: Optional[str] = Field(None, max_length=100)
+    department_id: Optional[int] = Field(None, description="Department ID (FK)")
     academic_year: Optional[str] = Field(None, max_length=10)
     date_of_birth: Optional[date] = None
 
@@ -18,7 +18,8 @@ class StudentResponse(BaseModel):
     user_id: int
     student_code: str
     date_of_birth: Optional[date] = None
-    major: Optional[str] = None
+    department_id: Optional[int] = None
+    department: Optional[str] = None  # Department name for display
     academic_year: Optional[str] = None
     is_verified: bool
     created_at: datetime
@@ -36,7 +37,7 @@ class StudentResponse(BaseModel):
 
 class StudentUpdateRequest(BaseModel):
     """Request to update student information."""
-    major: Optional[str] = Field(None, max_length=100, description="Major/Specialization")
+    department_id: Optional[int] = Field(None, description="Department ID")
     academic_year: Optional[str] = Field(None, max_length=10, description="Academic year")
     date_of_birth: Optional[date] = Field(None, description="Date of birth")
     phone: Optional[str] = Field(None, max_length=50, description="Phone number")

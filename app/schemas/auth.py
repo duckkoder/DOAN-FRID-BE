@@ -18,7 +18,7 @@ class RegisterRequest(BaseModel):
     
     # Student-specific
     student_code: Optional[str] = Field(None, max_length=50, description="Student code (required if role=student)")
-    major: Optional[str] = Field(None, max_length=200, description="Major (optional for student)")
+    department_id: Optional[int] = Field(None, description="Department ID (optional for student)")
     academic_year: Optional[int] = Field(None, ge=2000, le=2100, description="Academic year (optional for student)")
     date_of_birth: Optional[date] = Field(None, description="Date of birth (optional for student)")
     @field_validator('role')
@@ -47,7 +47,7 @@ class RegisterRequest(BaseModel):
                     "role": "student",
                     "phone": "0123456789",
                     "student_code": "SV001",
-                    "major": "Computer Science",
+                    "department_id": 1,
                     "academic_year": 2024
                 },
                 {
@@ -87,7 +87,8 @@ class UserResponse(BaseModel):
 
     student_id: Optional[int] = None
     student_code: Optional[str] = None
-    major: Optional[str] = None
+    department_id: Optional[int] = None  # For student
+    department: Optional[str] = None  # Department name for display (for both teacher and student)
     academic_year: Optional[int] = None
 
     model_config = {"from_attributes": True}

@@ -12,12 +12,13 @@ class Student(BaseModel):
     user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), unique=True, nullable=False)
     student_code = Column(String(20), unique=True, nullable=False, index=True)
     date_of_birth = Column(Date, nullable=True)
-    major = Column(String(100), nullable=True)
+    department_id = Column(Integer, ForeignKey("departments.id", ondelete="SET NULL"), nullable=True)
     academic_year = Column(String(10), nullable=True)
     is_verified = Column(Boolean, default=False)
     
     # Relationships
     user = relationship("User", back_populates="student")
+    department = relationship("Department", foreign_keys=[department_id])
     face_embeddings = relationship("FaceEmbedding", back_populates="student", cascade="all, delete-orphan")
     class_members = relationship("ClassMember", back_populates="student", cascade="all, delete-orphan")
     attendance_records = relationship("AttendanceRecord", back_populates="student", cascade="all, delete-orphan")

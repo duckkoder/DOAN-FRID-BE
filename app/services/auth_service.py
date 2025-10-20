@@ -106,10 +106,19 @@ class AuthService:
             )
             db.add(teacher)
         elif request.role == "student":
+            # Validate department_id if provided
+            if request.department_id:
+                department = db.query(Department).filter(Department.id == request.department_id).first()
+                if not department:
+                    raise HTTPException(
+                        status_code=status.HTTP_400_BAD_REQUEST,
+                        detail=f"Department with ID {request.department_id} does not exist"
+                    )
+            
             student = Student(
                 user_id=new_user.id,
                 student_code=request.student_code,
-                major=request.major,
+                department_id=request.department_id,
                 academic_year=request.academic_year,
                 date_of_birth=request.date_of_birth,
             )
@@ -304,8 +313,15 @@ class AuthService:
             if student:
                 user_data["student_id"] = student.id
                 user_data["student_code"] = student.student_code
-                user_data["major"] = student.major
+                user_data["department_id"] = student.department_id
                 user_data["academic_year"] = student.academic_year
                 user_data["date_of_birth"] = student.date_of_birth.isoformat() if student.date_of_birth else None
+                
+                # Include department name for convenience
+                if student.department_id:
+                    department = db.query(Department).filter(Department.id == student.department_id).first()
+                    user_data["department"] = department.name if department else None
+                else:
+                    user_data["department"] = None
         return user_data
     
