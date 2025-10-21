@@ -1,7 +1,7 @@
 """Attendance endpoints with WebSocket support for real-time updates."""
 from fastapi import APIRouter, Depends, WebSocket, WebSocketDisconnect, status, HTTPException
 from sqlalchemy.orm import Session
-from typing import Dict, Set, Any
+from typing import Dict, Set, Any, Optional
 from datetime import datetime
 import json
 
@@ -184,6 +184,30 @@ async def get_session_attendance(
     """
     service = AttendanceService(db)
     return await service.get_session_attendance(current_user, session_id)
+
+
+@router.get("/classes/{class_id}/sessions")
+async def get_class_sessions(
+    class_id: int,
+    status: Optional[str] = None,
+    skip: int = 0,
+    limit: int = 100,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """
+    Lấy danh sách các phiên điểm danh của lớp.
+    
+    - Giáo viên: Xem tất cả phiên của lớp mình dạy
+    - Sinh viên: Xem tất cả phiên của lớp mình học
+    
+    Query params:
+    - status: Filter theo trạng thái (ongoing, finished, scheduled)
+    - skip: Số phiên bỏ qua (pagination)
+    - limit: Số phiên tối đa trả về
+    """
+    service = AttendanceService(db)
+    return await service.get_class_sessions(current_user, class_id, status, skip, limit)
 
 
 # ============= WebSocket Endpoint =============

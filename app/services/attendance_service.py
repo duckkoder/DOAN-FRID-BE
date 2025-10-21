@@ -416,6 +416,102 @@ class AttendanceService:
             statistics=statistics
         )
     
+    async def get_class_sessions(
+        self,
+        current_user: User,
+        class_id: int,
+        status_filter: Optional[str] = None,
+        skip: int = 0,
+        limit: int = 100
+    ) -> Dict[str, Any]:
+        """
+        Lấy danh sách các phiên điểm danh của lớp.
+        
+        Returns:
+            {
+                "sessions": [...],
+                "total": int
+            }
+        """
+        # Kiểm tra quyền truy cập
+        if current_user.role == UserRole.TEACHER:
+            teacher = self.db.query(Teacher).filter(Teacher.user_id == current_user.id).first()
+            if not teacher:
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail="Không tìm thấy thông tin giáo viên"
+                )
+            
+            class_obj = self.db.query(Class).filter(Class.id == class_id).first()
+            if not class_obj:
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail="Không tìm thấy lớp học"
+                )
+            
+            if class_obj.teacher_id != teacher.id:
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail="Bạn không có quyền xem lớp này"
+                )
+        
+        elif current_user.role == UserRole.STUDENT:
+            student = self.db.query(Student).filter(Student.user_id == current_user.id).first()
+            if not student:
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail="Không tìm thấy thông tin sinh viên"
+                )
+            
+            member = self.db.query(ClassMember).filter(
+                ClassMember.class_id == class_id,
+                ClassMember.student_id == student.id
+            ).first()
+            if not member:
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail="Bạn không thuộc lớp này"
+                )
+        
+        # Lấy danh sách phiên
+        sessions = self.session_repo.get_sessions_by_class(
+            class_id=class_id,
+            status=status_filter,
+            skip=skip,
+            limit=limit
+        )
+        
+        # Đếm tổng số phiên
+        total = self.session_repo.count_sessions_by_class(
+            class_id=class_id,
+            status=status_filter
+        )
+        
+        # Chuyển đổi sang schema và thêm statistics cho mỗi phiên
+        session_responses = []
+        for session in sessions:
+            # Lấy statistics của phiên
+            records = self.record_repo.get_records_by_session(session.id)
+            total_students = len(self.member_repo.get_student_ids_by_class(session.class_id))
+            present_count = sum(1 for r in records if r.status == AttendanceStatus.PRESENT)
+            late_count = sum(1 for r in records if r.status == AttendanceStatus.LATE)
+            absent_count = sum(1 for r in records if r.status == AttendanceStatus.ABSENT)
+            
+            session_data = SessionResponse.model_validate(session).model_dump()
+            session_data["statistics"] = {
+                "total_students": total_students,
+                "present_count": present_count,
+                "late_count": late_count,
+                "absent_count": absent_count,
+                "attendance_rate": round((present_count + late_count) / total_students * 100, 2) if total_students > 0 else 0
+            }
+            session_responses.append(session_data)
+        
+        return {
+            "sessions": session_responses,
+            "total": total
+        }
+    
     # ============= Helper Methods =============
     
     def _determine_status(self, session) -> str:
