@@ -3,7 +3,8 @@ from fastapi import APIRouter
 
 from app.api.v1 import leaveRequestAPI, teacherClassAPI
 from app.api.v1 import studentClassAPI
-from app.api.v1 import auth, admin, files, attendance
+from app.api.v1 import auth, admin, files, department, specialization, attendance
+
 
 
 # Create main API router
@@ -20,6 +21,10 @@ api_router.include_router(admin.router, tags=["Admin"])
 api_router.include_router(files.router, tags=["Files"])
 
 api_router.include_router(leaveRequestAPI.router, tags=["Leave Requests"])
+
+# Department & Specialization routers (tags already defined in their routers)
+api_router.include_router(department.router)
+api_router.include_router(specialization.router)
 
 # Include attendance router
 api_router.include_router(attendance.router, tags=["Attendance"])

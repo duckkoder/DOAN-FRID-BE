@@ -6,6 +6,7 @@ from fastapi import HTTPException, status
 
 from app.models.student import Student
 from app.models.user import User
+from app.models.department import Department
 from app.schemas.student import StudentUpdateRequest, StudentResponse
 
 
@@ -16,7 +17,7 @@ class StudentService:
     def get_student_list(
         db: Session,
         search: Optional[str] = None,
-        major: Optional[str] = None,
+        department: Optional[str] = None,
         academic_year: Optional[str] = None,
         is_active: Optional[bool] = None,
         is_verified: Optional[bool] = None,
@@ -29,7 +30,7 @@ class StudentService:
         Args:
             db: Database session
             search: Search by student name, email, or student code
-            major: Filter by major
+            department: Filter by department name
             academic_year: Filter by academic year
             is_active: Filter by active status
             is_verified: Filter by verification status
@@ -51,8 +52,10 @@ class StudentService:
             )
             query = query.filter(search_filter)
         
-        if major:
-            query = query.filter(Student.major.ilike(f"%{major}%"))
+        if department:
+            # Join Department table to filter by name
+            query = query.join(Department, Student.department_id == Department.id)
+            query = query.filter(Department.name.ilike(f"%{department}%"))
         
         if academic_year:
             query = query.filter(Student.academic_year == academic_year)
@@ -79,12 +82,19 @@ class StudentService:
         # Build response
         student_list = []
         for student, user in students:
+            # Get department name if exists
+            department_name = None
+            if student.department_id:
+                department = db.query(Department).filter(Department.id == student.department_id).first()
+                department_name = department.name if department else None
+            
             student_data = StudentResponse(
                 id=student.id,
                 user_id=student.user_id,
                 student_code=student.student_code,
                 date_of_birth=student.date_of_birth,
-                major=student.major,
+                department_id=student.department_id,
+                department=department_name,
                 academic_year=student.academic_year,
                 is_verified=student.is_verified,
                 created_at=student.created_at,
@@ -140,12 +150,19 @@ class StudentService:
         
         student, user = result
         
+        # Get department name if exists
+        department_name = None
+        if student.department_id:
+            department = db.query(Department).filter(Department.id == student.department_id).first()
+            department_name = department.name if department else None
+        
         student_data = StudentResponse(
             id=student.id,
             user_id=student.user_id,
             student_code=student.student_code,
             date_of_birth=student.date_of_birth,
-            major=student.major,
+            department_id=student.department_id,
+            department=department_name,
             academic_year=student.academic_year,
             is_verified=student.is_verified,
             created_at=student.created_at,
@@ -188,22 +205,38 @@ class StudentService:
         # Update student fields
         update_dict = update_data.model_dump(exclude_unset=True)
         
+        # Validate department_id if provided
+        if 'department_id' in update_dict and update_dict['department_id'] is not None:
+            department = db.query(Department).filter(Department.id == update_dict['department_id']).first()
+            if not department:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=f"Department with ID {update_dict['department_id']} does not exist"
+                )
+        
         for field, value in update_dict.items():
-            if field in ['major', 'academic_year', 'date_of_birth', 'is_verified']:
+            if field in ['department_id', 'academic_year', 'date_of_birth', 'is_verified']:
                 setattr(student, field, value)
-            elif field in ['phone', 'is_active']:
+            elif field in ['phone', 'avatar_url', 'is_active']:
                 setattr(user, field, value)
         
         db.commit()
         db.refresh(student)
         db.refresh(user)
         
+        # Get department name if exists
+        department_name = None
+        if student.department_id:
+            department = db.query(Department).filter(Department.id == student.department_id).first()
+            department_name = department.name if department else None
+        
         student_data = StudentResponse(
             id=student.id,
             user_id=student.user_id,
             student_code=student.student_code,
             date_of_birth=student.date_of_birth,
-            major=student.major,
+            department_id=student.department_id,
+            department=department_name,
             academic_year=student.academic_year,
             is_verified=student.is_verified,
             created_at=student.created_at,

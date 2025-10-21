@@ -7,8 +7,8 @@ from datetime import datetime
 class TeacherBase(BaseModel):
     """Base teacher schema."""
     teacher_code: str = Field(..., max_length=20)
-    department: Optional[str] = Field(None, max_length=100)
-    specialization: Optional[str] = Field(None, max_length=100)
+    department_id: Optional[int] = Field(None, description="Department ID")
+    specialization_id: Optional[int] = Field(None, description="Specialization ID")
 
 
 class TeacherResponse(BaseModel):
@@ -16,8 +16,10 @@ class TeacherResponse(BaseModel):
     id: int
     user_id: int
     teacher_code: str
-    department: Optional[str] = None
-    specialization: Optional[str] = None
+    department_id: Optional[int] = None
+    specialization_id: Optional[int] = None
+    department: Optional[str] = None  # Department name for display
+    specialization: Optional[str] = None  # Specialization name for display
     created_at: datetime
     updated_at: datetime
     
@@ -33,9 +35,10 @@ class TeacherResponse(BaseModel):
 
 class TeacherUpdateRequest(BaseModel):
     """Request to update teacher information."""
-    department: Optional[str] = Field(None, max_length=100, description="Department")
-    specialization: Optional[str] = Field(None, max_length=100, description="Specialization")
+    department_id: Optional[int] = Field(None, description="Department ID")
+    specialization_id: Optional[int] = Field(None, description="Specialization ID")
     phone: Optional[str] = Field(None, max_length=50, description="Phone number")
+    avatar_url: Optional[str] = Field(None, description="Avatar URL (S3)")
     is_active: Optional[bool] = Field(None, description="Active status")
 
 
