@@ -1,12 +1,16 @@
 """Attendance endpoints with WebSocket support for real-time updates."""
 from fastapi import APIRouter, Depends, WebSocket, WebSocketDisconnect, status, HTTPException
 from sqlalchemy.orm import Session
-from typing import Dict, Set
+from typing import Dict, Set, Any
+from datetime import datetime
 import json
 
 from app.core.database import get_db
 from app.core.dependencies import get_current_user
 from app.models.user import User
+from app.models.attendance_session import AttendanceSession
+from app.models.attendance_record import AttendanceRecord
+from app.models.student import Student
 from app.schemas.attendance import (
     StartSessionRequest,
     SessionResponse,
@@ -16,7 +20,9 @@ from app.schemas.attendance import (
     RecognizeFrameResponse,
     SessionAttendanceListResponse,
     WSAttendanceUpdate,
-    WSSessionStatus
+    WSSessionStatus,
+    StudentCurrentSessionResponse,
+    WSStudentAttendanceUpdate
 )
 from app.services.attendance_service import AttendanceService
 
@@ -240,7 +246,341 @@ async def websocket_endpoint(
         manager.disconnect(websocket, session_id)
 
 
+# ============= Student API - Real-time Attendance View =============
+
+@router.get("/classes/{class_id}/current-session-attendance")
+async def get_current_session_attendance_for_student(
+    class_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """
+    Sinh viên xem danh sách điểm danh realtime của cả lớp.
+    
+    Returns:
+        - has_active_session: bool
+        - session: Session info nếu có
+        - students: Danh sách tất cả sinh viên với trạng thái điểm danh
+        - my_student_id: ID sinh viên của user hiện tại
+    """
+    from app.models.class_member import ClassMember
+    
+    # 1. Verify student is in this class
+    student = db.query(Student).filter(
+        Student.user_id == current_user.id
+    ).first()
+    
+    if not student:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Bạn không phải là sinh viên"
+        )
+    
+    # Check if student is enrolled in this class
+    enrollment = db.query(ClassMember).filter(
+        ClassMember.class_id == class_id,
+        ClassMember.student_id == student.id
+    ).first()
+    
+    if not enrollment:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Bạn không thuộc lớp học này"
+        )
+    
+    # 2. Find active session
+    session = db.query(AttendanceSession).filter(
+        AttendanceSession.class_id == class_id,
+        AttendanceSession.status == "ongoing"
+    ).first()
+    
+    if not session:
+        return {
+            "has_active_session": False,
+            "session": None,
+            "students": [],
+            "my_student_id": student.id
+        }
+    
+    # 3. Get all students in this class with user info (eager loading to avoid N+1)
+    from sqlalchemy.orm import joinedload
+    
+    class_members = db.query(ClassMember).filter(
+        ClassMember.class_id == class_id
+    ).all()
+    
+    # Get all students with their user info in one query
+    student_ids = [member.student_id for member in class_members]
+    students_in_class = db.query(Student).options(
+        joinedload(Student.user)
+    ).filter(
+        Student.id.in_(student_ids)
+    ).all()
+    
+    # Create student map for quick lookup
+    student_map = {s.id: s for s in students_in_class}
+    
+    # 4. Get attendance records for this session
+    attendance_records = db.query(AttendanceRecord).filter(
+        AttendanceRecord.session_id == session.id
+    ).all()
+    
+    # Create a map of student_id -> attendance_record
+    attendance_map = {record.student_id: record for record in attendance_records}
+    
+    # 5. Build student list with attendance status
+    students_data = []
+    for member in class_members:
+        member_student = student_map.get(member.student_id)
+        
+        if not member_student or not member_student.user:
+            continue
+        
+        attendance_record = attendance_map.get(member.student_id)
+        
+        # Get full name from user (User model only has full_name, not first_name/last_name)
+        user = member_student.user
+        full_name = user.full_name if user.full_name else user.email
+        
+        students_data.append({
+            "student_id": member_student.id,
+            "student_code": member_student.student_code,
+            "full_name": full_name,
+            "is_present": attendance_record is not None,
+            "status": attendance_record.status if attendance_record else None,
+            "recorded_at": attendance_record.recorded_at.isoformat() if attendance_record and attendance_record.recorded_at else None,
+            "confidence_score": attendance_record.confidence_score if attendance_record else None
+        })
+    
+    # Sort: attended first, then by name
+    students_data.sort(key=lambda x: (not x["is_present"], x["full_name"]))
+    
+    return {
+        "has_active_session": True,
+        "session": {
+            "id": session.id,
+            "session_name": session.session_name,
+            "start_time": session.start_time.isoformat() if session.start_time else None,
+            "status": session.status
+        },
+        "students": students_data,
+        "my_student_id": student.id,
+        "stats": {
+            "total_students": len(students_data),
+            "present_count": sum(1 for s in students_data if s["is_present"]),
+            "absent_count": sum(1 for s in students_data if not s["is_present"])
+        }
+    }
+
+@router.get("/classes/{class_id}/current-session", response_model=StudentCurrentSessionResponse)
+async def get_current_session_for_student(
+    class_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """
+    [DEPRECATED] Use /current-session-attendance instead.
+    
+    Sinh viên check xem lớp có phiên điểm danh đang diễn ra không.
+    Kèm theo trạng thái điểm danh của sinh viên đó.
+    
+    Returns:
+        - has_active_session: bool
+        - session: Session info nếu có
+        - my_status: Trạng thái điểm danh của sinh viên
+    """
+    # 1. Tìm session đang ongoing
+    session = db.query(AttendanceSession).filter(
+        AttendanceSession.class_id == class_id,
+        AttendanceSession.status == "ongoing"
+    ).first()
+    
+    if not session:
+        return StudentCurrentSessionResponse(
+            has_active_session=False,
+            session=None,
+            my_status=None
+        )
+    
+    # 2. Lấy thông tin student từ user
+    student = db.query(Student).filter(
+        Student.user_id == current_user.id
+    ).first()
+    
+    if not student:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Bạn không phải là sinh viên"
+        )
+    
+    # 3. Check xem sinh viên đã điểm danh chưa
+    attendance_record = db.query(AttendanceRecord).filter(
+        AttendanceRecord.session_id == session.id,
+        AttendanceRecord.student_id == student.id
+    ).first()
+    
+    my_status = None
+    if attendance_record:
+        from app.schemas.attendance import StudentAttendanceStatus
+        my_status = StudentAttendanceStatus(
+            is_present=attendance_record.status in ["present", "late"],
+            status=attendance_record.status,
+            recorded_at=attendance_record.recorded_at,
+            confidence_score=attendance_record.confidence_score
+        )
+    
+    # 4. Return response
+    return StudentCurrentSessionResponse(
+        has_active_session=True,
+        session=SessionResponse.from_orm(session),
+        my_status=my_status
+    )
+
+
 # ============= Additional Endpoints =============
+
+# ============= Additional Endpoints =============
+
+@router.post("/webhook/ai-recognition", status_code=status.HTTP_200_OK)
+async def ai_recognition_webhook(
+    request: Dict[str, Any],
+    db: Session = Depends(get_db)
+):
+    """
+    Webhook endpoint for AI service to send recognition results.
+    
+    Request body:
+    {
+        "session_id": "string",
+        "class_id": int,
+        "recognized_students": [student_id1, student_id2, ...],
+        "timestamp": "ISO datetime string",
+        "total_faces_detected": int
+    }
+    
+    This endpoint:
+    1. Validates the session exists
+    2. Creates attendance records for recognized students
+    3. Broadcasts updates via WebSocket to connected clients
+    """
+    try:
+        # Extract data from request
+        session_id_str = request.get("session_id")
+        class_id = request.get("class_id")
+        recognized_students = request.get("recognized_students", [])
+        timestamp = request.get("timestamp")
+        
+        # Parse session_id (format: "class_{class_id}_session_{session_id}")
+        # Extract numeric session_id
+        import re
+        match = re.search(r'session_(\d+)', session_id_str)
+        if not match:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Invalid session_id format"
+            )
+        session_id = int(match.group(1))
+        
+        # Verify session exists and is ongoing
+        session = db.query(AttendanceSession).filter(
+            AttendanceSession.id == session_id,
+            AttendanceSession.class_id == class_id,
+            AttendanceSession.status == "ongoing"
+        ).first()
+        
+        if not session:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Session not found or not active"
+            )
+        
+        # Process each recognized student
+        newly_recorded = []
+        for student_id in recognized_students:
+            # Check if already recorded
+            existing_record = db.query(AttendanceRecord).filter(
+                AttendanceRecord.session_id == session_id,
+                AttendanceRecord.student_id == student_id
+            ).first()
+            
+            if existing_record:
+                continue  # Skip already recorded students
+            
+            # Create new attendance record
+            new_record = AttendanceRecord(
+                session_id=session_id,
+                student_id=student_id,
+                status="present",
+                recorded_at=datetime.utcnow(),
+                confidence_score=0.85  # Default confidence
+            )
+            db.add(new_record)
+            newly_recorded.append(student_id)
+        
+        # Commit all new records
+        if newly_recorded:
+            db.commit()
+            
+            # Broadcast updates via WebSocket
+            for student_id in newly_recorded:
+                # Get student info
+                student = db.query(Student).filter(Student.id == student_id).first()
+                if not student:
+                    continue
+                
+                # Get the attendance record we just created
+                record = db.query(AttendanceRecord).filter(
+                    AttendanceRecord.session_id == session_id,
+                    AttendanceRecord.student_id == student_id
+                ).first()
+                
+                # Broadcast to session (for teacher view)
+                await manager.broadcast_to_session(
+                    session_id,
+                    {
+                        "type": "attendance_update",
+                        "session_id": session_id,
+                        "student": {
+                            "student_id": student.id,
+                            "student_code": student.student_code,
+                            "full_name": f"{student.first_name} {student.last_name}",
+                            "status": record.status,
+                            "confidence_score": record.confidence_score,
+                            "recorded_at": record.recorded_at.isoformat() if record.recorded_at else None
+                        }
+                    }
+                )
+                
+                # ✅ NEW: Broadcast student-specific update
+                # This message will be picked up by the student's WebSocket connection
+                student_message = WSStudentAttendanceUpdate(
+                    type="student_attendance_update",
+                    session_id=session_id,
+                    student_id=student.id,
+                    status=record.status,
+                    recorded_at=record.recorded_at.isoformat() if record.recorded_at else None,
+                    confidence_score=record.confidence_score,
+                    message=f"✅ Bạn đã được điểm danh thành công lúc {record.recorded_at.strftime('%H:%M:%S') if record.recorded_at else 'N/A'}"
+                )
+                
+                await manager.broadcast_to_session(
+                    session_id,
+                    student_message.model_dump()
+                )
+        
+        return {
+            "success": True,
+            "message": f"Processed {len(newly_recorded)} new attendance records",
+            "newly_recorded": newly_recorded
+        }
+        
+    except Exception as e:
+        print(f"Error in AI recognition webhook: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to process recognition results: {str(e)}"
+        )
+
 
 @router.get("/sessions")
 async def get_sessions(

@@ -118,11 +118,127 @@ class WSAttendanceUpdate(BaseModel):
     student: RecognizedStudent
 
 
+class WSStudentStatusUpdate(BaseModel):
+    """Message WebSocket gửi cho sinh viên về trạng thái điểm danh của họ."""
+    type: str = "student_status_update"
+    session_id: int
+    student_id: int
+    status: str  # pending_confirmation, present, late, etc.
+    confidence_score: Optional[float] = None
+    message: str
+    recorded_at: datetime
+
+
+class WSConfirmationUpdate(BaseModel):
+    """Message WebSocket khi giáo viên xác nhận điểm danh."""
+    type: str = "confirmation_update"
+    session_id: int
+    student_id: int
+    student_code: str
+    full_name: str
+    status: str  # present, late, rejected
+    confirmed_by: Optional[str] = None
+    confirmed_at: Optional[datetime] = None
+
+
 class WSSessionStatus(BaseModel):
     """Message WebSocket về trạng thái phiên."""
     type: str = "session_status"
     session_id: int
     status: str
+    message: str
+
+
+# ============= Teacher Confirmation Schemas =============
+
+class ConfirmAttendanceRequest(BaseModel):
+    """Request xác nhận điểm danh."""
+    status: str = Field(default="present", description="present hoặc late")
+    notes: Optional[str] = Field(None, description="Ghi chú")
+
+
+class RejectAttendanceRequest(BaseModel):
+    """Request từ chối điểm danh."""
+    reason: Optional[str] = Field(None, description="Lý do từ chối")
+
+
+class ConfirmAttendanceResponse(BaseModel):
+    """Response sau khi xác nhận."""
+    success: bool
+    record: AttendanceRecordDetail
+
+
+class ConfirmAllPendingResponse(BaseModel):
+    """Response sau khi xác nhận tất cả."""
+    success: bool
+    confirmed_count: int
+    records: List[AttendanceRecordDetail]
+
+
+class PendingStudentDetail(BaseModel):
+    """Thông tin sinh viên chờ xác nhận."""
+    record_id: int
+    student_id: int
+    student_code: str
+    full_name: str
+    confidence_score: Optional[float]
+    recorded_at: datetime
+    
+    class Config:
+        from_attributes = True
+
+
+class PendingStudentsResponse(BaseModel):
+    """Danh sách sinh viên chờ xác nhận."""
+    pending_count: int
+    students: List[PendingStudentDetail]
+
+
+# ============= Student Schemas =============
+
+class CurrentSessionResponse(BaseModel):
+    """Thông tin phiên điểm danh hiện tại."""
+    has_active_session: bool
+    session: Optional[SessionResponse] = None
+    my_attendance: Optional[AttendanceRecordDetail] = None
+
+
+class MyAttendanceStatusResponse(BaseModel):
+    """Trạng thái điểm danh của sinh viên."""
+    student_id: int
+    status: Optional[str] = None  # None nếu chưa điểm danh
+    recorded_at: Optional[datetime] = None
+    confirmed_at: Optional[datetime] = None
+    is_ai_detected: bool = False
+    confidence_score: Optional[float] = None
+    message: str  # Human-readable message
+
+
+# ============= Student Schemas (Simplified) =============
+
+class StudentAttendanceStatus(BaseModel):
+    """Trạng thái điểm danh của sinh viên."""
+    is_present: bool
+    status: str  # present, late, absent
+    recorded_at: Optional[datetime]
+    confidence_score: Optional[float]
+
+
+class StudentCurrentSessionResponse(BaseModel):
+    """Response cho sinh viên check phiên hiện tại."""
+    has_active_session: bool
+    session: Optional[SessionResponse] = None
+    my_status: Optional[StudentAttendanceStatus] = None
+
+
+class WSStudentAttendanceUpdate(BaseModel):
+    """WebSocket message gửi cho sinh viên khi được điểm danh."""
+    type: str = "student_attendance_update"
+    session_id: int
+    student_id: int
+    status: str
+    recorded_at: datetime
+    confidence_score: float
     message: str
 
 
