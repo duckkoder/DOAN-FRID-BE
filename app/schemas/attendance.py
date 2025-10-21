@@ -47,6 +47,17 @@ class EndSessionResponse(BaseModel):
 
 # ============= Recognition Schemas =============
 
+class DetectionInfo(BaseModel):
+    """Thông tin detection của khuôn mặt."""
+    bbox: List[float] = Field(..., description="Bounding box [x1, y1, x2, y2]")
+    confidence: float = Field(..., description="Độ tin cậy detection")
+    track_id: Optional[int] = Field(None, description="ID tracking")
+    student_id: Optional[str] = Field(None, description="ID sinh viên nếu được nhận diện")
+    student_code: Optional[str] = Field(None, description="Mã sinh viên")
+    student_name: Optional[str] = Field(None, description="Tên sinh viên")
+    recognition_confidence: Optional[float] = Field(None, description="Độ tin cậy nhận diện")
+
+
 class RecognizeFrameRequest(BaseModel):
     """Request để nhận diện frame từ camera."""
     session_id: int = Field(..., description="ID của phiên điểm danh")
@@ -70,6 +81,7 @@ class RecognizeFrameResponse(BaseModel):
     total_faces_detected: int
     students_recognized: List[RecognizedStudent]
     processing_time_ms: float
+    detections: Optional[List[DetectionInfo]] = Field(default=None, description="Thông tin detections với bbox")
 
 
 # ============= Attendance Record Schemas =============

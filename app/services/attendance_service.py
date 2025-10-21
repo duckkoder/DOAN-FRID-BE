@@ -27,6 +27,7 @@ from app.schemas.attendance import (
     RecognizeFrameRequest,
     RecognizeFrameResponse,
     RecognizedStudent,
+    DetectionInfo,
     AttendanceRecordDetail,
     SessionAttendanceListResponse
 )
@@ -258,23 +259,48 @@ class AttendanceService:
         
         # Xử lý kết quả nhận diện
         recognized_students = []
+        detections_info = []  # Thêm list để lưu thông tin detections
         
         for face in ai_result.get("faces", []):
             print(f"[DEBUG] Processing face: person_name={face.get('person_name')}, confidence={face.get('recognition_confidence')}")
             person_name = face.get("person_name")
             recognition_confidence = face.get("recognition_confidence")
+            bbox = face.get("bbox", [])
+            detection_confidence = face.get("confidence", 0.0)
+            
+            # Tạo detection info cho mỗi face (bao gồm cả Unknown)
+            detection = DetectionInfo(
+                bbox=bbox,
+                confidence=detection_confidence,
+                track_id=face.get("track_id"),
+                student_id=None,
+                student_code=None,
+                student_name=None,
+                recognition_confidence=recognition_confidence
+            )
             
             if not person_name or person_name == "Unknown":
                 print(f"[DEBUG] Skipping: person_name is {person_name}")
+                # Vẫn thêm vào detections_info nhưng không xử lý attendance
+                detections_info.append(detection)
                 continue
             
             # Tìm student từ person_name
             student = student_map.get(person_name)
             if not student:
                 print(f"[DEBUG] Student NOT FOUND for person_name='{person_name}' (Available: {list(student_map.keys())})")
+                # Vẫn thêm detection nhưng không có thông tin student
+                detection.student_id = person_name  # Để person_name nếu không tìm thấy
+                detections_info.append(detection)
                 continue
             
             print(f"[DEBUG] Student FOUND: {student.student_code} - {student.user.full_name}")
+            
+            # Cập nhật detection info với thông tin student
+            detection.student_id = str(student.id)
+            detection.student_code = student.student_code
+            detection.student_name = student.user.full_name
+            detections_info.append(detection)
             
             # Kiểm tra xem sinh viên đã được điểm danh chưa
             existing_record = self.record_repo.get_record_by_session_and_student(
@@ -312,7 +338,8 @@ class AttendanceService:
             message=f"Nhận diện thành công {len(recognized_students)}/{ai_result.get('total_faces', 0)} khuôn mặt",
             total_faces_detected=ai_result.get("total_faces", 0),
             students_recognized=recognized_students,
-            processing_time_ms=round(processing_time, 2)
+            processing_time_ms=round(processing_time, 2),
+            detections=detections_info  # Thêm thông tin detections vào response
         )
     
     async def get_session_attendance(
