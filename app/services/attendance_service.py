@@ -36,6 +36,9 @@ from app.schemas.attendance import (
 class AttendanceService:
     """Service xử lý logic điểm danh."""
     
+    # Class variable: In-memory mapping backend_session_id -> ai_session_id
+    _ai_session_map: Dict[int, str] = {}
+    
     def __init__(self, db: Session):
         self.db = db
         self.session_repo = AttendanceSessionRepository(db)
@@ -93,7 +96,21 @@ class AttendanceService:
                 detail=f"Lớp đang có phiên điểm danh đang diễn ra (ID: {ongoing_session.id})"
             )
         
-        # Tạo phiên mới
+        # Lấy danh sách student_codes trong lớp
+        class_members = self.member_repo.get_multi_by_filter(class_id=request.class_id)
+        student_codes = [
+            member.student.student_code 
+            for member in class_members 
+            if member.student and member.student.student_code
+        ]
+        
+        if not student_codes:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Lớp học không có sinh viên nào"
+            )
+        
+        # Tạo phiên mới trong database
         session_data = {
             "class_id": request.class_id,
             "session_name": request.session_name or f"Điểm danh {datetime.now().strftime('%d/%m/%Y %H:%M')}",
@@ -105,6 +122,21 @@ class AttendanceService:
         }
         
         new_session = self.session_repo.create(session_data)
+        
+        # Gọi AI-Service để load embeddings vào VRAM
+        try:
+            await self._initialize_ai_session(
+                session_id=new_session.id,
+                class_id=request.class_id,
+                student_codes=student_codes
+            )
+        except Exception as e:
+            # Nếu AI-Service fail, rollback session
+            self.session_repo.delete(new_session.id)
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail=f"Không thể khởi tạo AI-Service: {str(e)}"
+            )
         
         return SessionResponse.model_validate(new_session)
     
@@ -243,8 +275,11 @@ class AttendanceService:
                 detail="Bạn không có quyền với phiên này"
             )
         
-        # Gọi AI Service
-        ai_result = await self._call_ai_service(request.image_base64)
+        # Gọi AI Service với session context
+        ai_result = await self._call_ai_service(
+            image_base64=request.image_base64,
+            backend_session_id=request.session_id
+        )
         
         # Lấy danh sách sinh viên trong lớp
         class_members = self.member_repo.get_students_by_class(session.class_id)
@@ -527,9 +562,17 @@ class AttendanceService:
         else:
             return AttendanceStatus.LATE
     
-    async def _call_ai_service(self, image_base64: str) -> Dict[str, Any]:
+    async def _call_ai_service(
+        self, 
+        image_base64: str,
+        backend_session_id: Optional[int] = None
+    ) -> Dict[str, Any]:
         """
         Gọi AI Service để nhận diện khuôn mặt.
+        
+        Args:
+            image_base64: Base64 encoded image
+            backend_session_id: Backend session ID để lookup AI session ID
         
         Returns:
             {
@@ -546,11 +589,22 @@ class AttendanceService:
                 "processing_time_ms": float
             }
         """
+        payload = {"image_base64": image_base64}
+        
+        # ⚠️ CRITICAL: Truyền AI session_id để dùng embeddings từ VRAM
+        if backend_session_id is not None:
+            ai_session_id = AttendanceService._ai_session_map.get(backend_session_id)
+            if ai_session_id:
+                payload["session_id"] = ai_session_id
+                print(f"[DEBUG] Using AI session: {ai_session_id} for backend session: {backend_session_id}")
+            else:
+                print(f"[WARNING] No AI session mapping found for backend session: {backend_session_id}")
+        
         try:
             async with httpx.AsyncClient(timeout=30.0) as client:
                 response = await client.post(
                     f"{settings.AI_SERVICE_URL}/api/v1/detect",
-                    json={"image_base64": image_base64}
+                    json=payload
                 )
                 
                 if response.status_code != 200:
@@ -571,4 +625,70 @@ class AttendanceService:
                 status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
                 detail=f"Cannot connect to AI Service: {str(e)}"
             )
-
+    
+    async def _initialize_ai_session(
+        self,
+        session_id: int,
+        class_id: int,
+        student_codes: List[str]
+    ) -> Dict[str, Any]:
+        """
+        Khởi tạo AI-Service session với embeddings loaded vào VRAM.
+        
+        Flow:
+        1. Gọi AI-Service POST /api/v1/sessions
+        2. AI-Service query embeddings từ pgvector (1 query duy nhất)
+        3. AI-Service load embeddings vào VRAM (GPU memory)
+        
+        Args:
+            session_id: ID của attendance session trong backend database
+            class_id: ID của lớp học
+            student_codes: Danh sách student codes (100 students)
+        
+        Returns:
+            AI-Service session info
+        """
+        callback_url = f"{settings.BACKEND_BASE_URL}/api/v1/attendance/webhook/ai-recognition"
+        
+        payload = {
+            "class_id": str(class_id),
+            "student_codes": student_codes,
+            "backend_callback_url": callback_url,
+            "max_duration_minutes": 120  # 2 hours
+        }
+        
+        try:
+            async with httpx.AsyncClient(timeout=60.0) as client:
+                response = await client.post(
+                    f"{settings.AI_SERVICE_URL}/api/v1/sessions",
+                    json=payload
+                )
+                
+                if response.status_code not in [200, 201]:
+                    error_detail = response.text
+                    raise Exception(f"AI Service returned {response.status_code}: {error_detail}")
+                
+                ai_session_data = response.json()
+                
+                # Verify embeddings were loaded
+                if not ai_session_data.get("embeddings_loaded", False):
+                    raise Exception("AI-Service failed to load embeddings to VRAM")
+                
+                # Log success
+                ai_session_id = ai_session_data.get('session_id')
+                print(f"✅ AI-Service session created: {ai_session_id}")
+                print(f"   - Students: {len(student_codes)}")
+                print(f"   - Embeddings loaded: {ai_session_data.get('embeddings_loaded')}")
+                
+                # Store mapping: backend_session_id -> ai_session_id
+                AttendanceService._ai_session_map[session_id] = ai_session_id
+                print(f"   - Mapped: backend_session[{session_id}] -> ai_session[{ai_session_id}]")
+                
+                return ai_session_data
+        
+        except httpx.TimeoutException:
+            raise Exception("AI-Service timeout while initializing session")
+        except httpx.RequestError as e:
+            raise Exception(f"Cannot connect to AI-Service: {str(e)}")
+        except Exception as e:
+            raise Exception(f"Failed to initialize AI-Service session: {str(e)}")

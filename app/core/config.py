@@ -50,6 +50,7 @@ class Settings(BaseSettings):
     
     # AI Service
     AI_SERVICE_URL: str = "http://localhost:8096"  # URL của AI Service
+    BACKEND_BASE_URL: str = "http://localhost:8001"  # URL của Backend (for AI-Service callback)
     
     @property
     def MAX_FILE_SIZE_BYTES(self) -> int:
