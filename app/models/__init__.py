@@ -4,6 +4,8 @@ from app.models.base import Base, BaseModel
 # Import all models for Alembic detection
 from app.models.user import User
 from app.models.admin import Admin
+from app.models.department import Department
+from app.models.specialization import Specialization
 from app.models.teacher import Teacher
 from app.models.student import Student
 from app.models.model_config import ModelConfig
@@ -27,6 +29,8 @@ __all__ = [
     "BaseModel",
     "User",
     "Admin",
+    "Department",
+    "Specialization",
     "Teacher",
     "Student",
     "ModelConfig",

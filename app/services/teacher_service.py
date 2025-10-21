@@ -6,6 +6,8 @@ from fastapi import HTTPException, status
 
 from app.models.teacher import Teacher
 from app.models.user import User
+from app.models.department import Department
+from app.models.specialization import Specialization
 from app.schemas.teacher import TeacherUpdateRequest, TeacherResponse
 from app.utils.pagination import PaginationParams
 
@@ -49,7 +51,9 @@ class TeacherService:
             query = query.filter(search_filter)
         
         if department:
-            query = query.filter(Teacher.department.ilike(f"%{department}%"))
+            # Search by department name (join with departments table)
+            query = query.join(Department, Teacher.department_id == Department.id, isouter=True)
+            query = query.filter(Department.name.ilike(f"%{department}%"))
         
         if is_active is not None:
             query = query.filter(User.is_active == is_active)
@@ -68,12 +72,26 @@ class TeacherService:
         # Build response
         teacher_list = []
         for teacher, user in teachers:
+            # Get department and specialization names
+            department_name = None
+            specialization_name = None
+            
+            if teacher.department_id:
+                dept = db.query(Department).filter(Department.id == teacher.department_id).first()
+                department_name = dept.name if dept else None
+                
+            if teacher.specialization_id:
+                spec = db.query(Specialization).filter(Specialization.id == teacher.specialization_id).first()
+                specialization_name = spec.name if spec else None
+            
             teacher_data = TeacherResponse(
                 id=teacher.id,
                 user_id=teacher.user_id,
                 teacher_code=teacher.teacher_code,
-                department=teacher.department,
-                specialization=teacher.specialization,
+                department_id=teacher.department_id,
+                specialization_id=teacher.specialization_id,
+                department=department_name,
+                specialization=specialization_name,
                 created_at=teacher.created_at,
                 updated_at=teacher.updated_at,
                 full_name=user.full_name,
@@ -125,12 +143,26 @@ class TeacherService:
         
         teacher, user = result
         
+        # Get department and specialization names
+        department_name = None
+        specialization_name = None
+        
+        if teacher.department_id:
+            dept = db.query(Department).filter(Department.id == teacher.department_id).first()
+            department_name = dept.name if dept else None
+            
+        if teacher.specialization_id:
+            spec = db.query(Specialization).filter(Specialization.id == teacher.specialization_id).first()
+            specialization_name = spec.name if spec else None
+        
         teacher_data = TeacherResponse(
             id=teacher.id,
             user_id=teacher.user_id,
             teacher_code=teacher.teacher_code,
-            department=teacher.department,
-            specialization=teacher.specialization,
+            department_id=teacher.department_id,
+            specialization_id=teacher.specialization_id,
+            department=department_name,
+            specialization=specialization_name,
             created_at=teacher.created_at,
             updated_at=teacher.updated_at,
             full_name=user.full_name,
@@ -171,22 +203,60 @@ class TeacherService:
         # Update teacher fields
         update_dict = update_data.model_dump(exclude_unset=True)
         
+        # Validate department_id and specialization_id if provided
+        if 'department_id' in update_dict and update_dict['department_id'] is not None:
+            dept = db.query(Department).filter(Department.id == update_dict['department_id']).first()
+            if not dept:
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail=f"Department with id {update_dict['department_id']} not found"
+                )
+        
+        if 'specialization_id' in update_dict and update_dict['specialization_id'] is not None:
+            spec = db.query(Specialization).filter(Specialization.id == update_dict['specialization_id']).first()
+            if not spec:
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail=f"Specialization with id {update_dict['specialization_id']} not found"
+                )
+            
+            # Validate specialization belongs to department if both provided
+            if 'department_id' in update_dict and spec.department_id != update_dict['department_id']:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="Specialization does not belong to the selected department"
+                )
+        
         for field, value in update_dict.items():
-            if field in ['department', 'specialization']:
+            if field in ['department_id', 'specialization_id']:
                 setattr(teacher, field, value)
-            elif field in ['phone', 'is_active']:
+            elif field in ['phone', 'avatar_url', 'is_active']:
                 setattr(user, field, value)
         
         db.commit()
         db.refresh(teacher)
         db.refresh(user)
         
+        # Get department and specialization names
+        department_name = None
+        specialization_name = None
+        
+        if teacher.department_id:
+            dept = db.query(Department).filter(Department.id == teacher.department_id).first()
+            department_name = dept.name if dept else None
+            
+        if teacher.specialization_id:
+            spec = db.query(Specialization).filter(Specialization.id == teacher.specialization_id).first()
+            specialization_name = spec.name if spec else None
+        
         teacher_data = TeacherResponse(
             id=teacher.id,
             user_id=teacher.user_id,
             teacher_code=teacher.teacher_code,
-            department=teacher.department,
-            specialization=teacher.specialization,
+            department_id=teacher.department_id,
+            specialization_id=teacher.specialization_id,
+            department=department_name,
+            specialization=specialization_name,
             created_at=teacher.created_at,
             updated_at=teacher.updated_at,
             full_name=user.full_name,
