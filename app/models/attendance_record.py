@@ -12,7 +12,7 @@ class AttendanceRecord(BaseModel):
     
     session_id = Column(Integer, ForeignKey("attendance_sessions.id", ondelete="CASCADE"), nullable=False)
     student_id = Column(Integer, ForeignKey("students.id", ondelete="CASCADE"), nullable=False)
-    status = Column(String(50), nullable=False, default="absent")  # present, absent, excused
+    status = Column(String(50), nullable=False, default="absent")  # present, absent, late, excused
     image_path = Column(String(255), nullable=True)
     confidence_score = Column(Float, nullable=True)
     recorded_at = Column(DateTime, default=datetime.utcnow)

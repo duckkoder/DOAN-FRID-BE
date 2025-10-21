@@ -48,6 +48,10 @@ class Settings(BaseSettings):
     ALLOWED_IMAGE_EXTENSIONS: str = "jpg,jpeg,png,gif,webp"
     ALLOWED_DOCUMENT_EXTENSIONS: str = "pdf,doc,docx,xls,xlsx,jpg,jpeg,png,gif,webp"
     
+    # AI Service
+    AI_SERVICE_URL: str = "http://localhost:8096"  # URL của AI Service
+    BACKEND_BASE_URL: str = "http://localhost:8001"  # URL của Backend (for AI-Service callback)
+    
     @property
     def MAX_FILE_SIZE_BYTES(self) -> int:
         return self.MAX_FILE_SIZE_MB * 1024 * 1024
