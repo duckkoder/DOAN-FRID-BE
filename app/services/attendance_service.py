@@ -268,39 +268,42 @@ class AttendanceService:
             bbox = face.get("bbox", [])
             detection_confidence = face.get("confidence", 0.0)
             
-            # Tạo detection info cho mỗi face (bao gồm cả Unknown)
-            detection = DetectionInfo(
-                bbox=bbox,
-                confidence=detection_confidence,
-                track_id=face.get("track_id"),
-                student_id=None,
-                student_code=None,
-                student_name=None,
-                recognition_confidence=recognition_confidence
-            )
+            # Kiểm tra xem có phải sinh viên trong lớp không
+            student = None
+            if person_name and person_name != "Unknown":
+                student = student_map.get(person_name)
             
-            if not person_name or person_name == "Unknown":
-                print(f"[DEBUG] Skipping: person_name is {person_name}")
-                # Vẫn thêm vào detections_info nhưng không xử lý attendance
-                detections_info.append(detection)
-                continue
+            # Tạo detection info
+            if student:
+                # Trường hợp 1: Sinh viên TRONG lớp
+                print(f"[DEBUG] Student FOUND: {student.student_code} - {student.user.full_name}")
+                detection = DetectionInfo(
+                    bbox=bbox,
+                    confidence=detection_confidence,
+                    track_id=face.get("track_id"),
+                    student_id=str(student.id),
+                    student_code=student.student_code,
+                    student_name=student.user.full_name,
+                    recognition_confidence=recognition_confidence
+                )
+            else:
+                # Trường hợp 2: Unknown (bao gồm cả người không trong lớp)
+                print(f"[DEBUG] Unknown face: person_name={person_name}")
+                detection = DetectionInfo(
+                    bbox=bbox,
+                    confidence=detection_confidence,
+                    track_id=face.get("track_id"),
+                    student_id=None,
+                    student_code=None,
+                    student_name="Unknown",
+                    recognition_confidence=recognition_confidence
+                )
             
-            # Tìm student từ person_name
-            student = student_map.get(person_name)
-            if not student:
-                print(f"[DEBUG] Student NOT FOUND for person_name='{person_name}' (Available: {list(student_map.keys())})")
-                # Vẫn thêm detection nhưng không có thông tin student
-                detection.student_id = person_name  # Để person_name nếu không tìm thấy
-                detections_info.append(detection)
-                continue
-            
-            print(f"[DEBUG] Student FOUND: {student.student_code} - {student.user.full_name}")
-            
-            # Cập nhật detection info với thông tin student
-            detection.student_id = str(student.id)
-            detection.student_code = student.student_code
-            detection.student_name = student.user.full_name
             detections_info.append(detection)
+            
+            # Chỉ xử lý attendance nếu là sinh viên trong lớp
+            if not student:
+                continue
             
             # Kiểm tra xem sinh viên đã được điểm danh chưa
             existing_record = self.record_repo.get_record_by_session_and_student(
