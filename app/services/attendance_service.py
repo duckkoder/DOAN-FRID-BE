@@ -118,7 +118,10 @@ class AttendanceService:
             "status": SessionStatus.ONGOING,
             "late_threshold_minutes": request.late_threshold_minutes,
             "location": request.location,
-            "allow_late_checkin": True
+            "allow_late_checkin": True,
+            "day_of_week": request.day_of_week,
+            "period_range": request.period_range,
+            "session_index": request.session_index
         }
         
         new_session = self.session_repo.create(session_data)
