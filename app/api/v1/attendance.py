@@ -1,5 +1,5 @@
-"""Attendance endpoints with WebSocket support for real-time updates."""
-from fastapi import APIRouter, Depends, WebSocket, WebSocketDisconnect, status, HTTPException
+"""Attendance endpoints with AI-Service integration."""
+from fastapi import APIRouter, Depends, WebSocket, WebSocketDisconnect, status, HTTPException, Request, Header
 from sqlalchemy.orm import Session
 from typing import Dict, Set, Any, Optional
 from datetime import datetime
@@ -22,9 +22,13 @@ from app.schemas.attendance import (
     WSAttendanceUpdate,
     WSSessionStatus,
     StudentCurrentSessionResponse,
-    WSStudentAttendanceUpdate
+    WSStudentAttendanceUpdate,
+    StartSessionWithAIResponse,
+    AICallbackPayload,
+    AICallbackResponse
 )
 from app.services.attendance_service import AttendanceService
+from app.services.attendance_ai_service import AttendanceAIService
 
 
 router = APIRouter(prefix="/attendance", tags=["Attendance"])
@@ -79,34 +83,34 @@ manager = ConnectionManager()
 
 # ============= REST API Endpoints =============
 
-@router.post("/sessions/start", response_model=SessionResponse, status_code=status.HTTP_201_CREATED)
+@router.post("/sessions/start", response_model=StartSessionWithAIResponse, status_code=status.HTTP_201_CREATED)
 async def start_attendance_session(
     request: StartSessionRequest,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
     """
-    Bắt đầu phiên điểm danh mới.
+    Bắt đầu phiên điểm danh mới với AI-Service.
     
-    - Chỉ giáo viên có thể bắt đầu phiên
-    - Kiểm tra quyền sở hữu lớp
-    - Không được có phiên nào đang chạy
+    **Flow:**
+    1. Backend tạo session với status="pending"
+    2. Backend gọi AI-Service để tạo session
+    3. Backend nhận ai_session_id, update status="active"
+    4. Client nhận WebSocket URL + JWT token
+    5. Client connect trực tiếp tới AI-Service WebSocket
+    
+    **Returns:**
+    - `session_id`: Backend session ID
+    - `ai_session_id`: AI Service session ID  
+    - `ai_ws_url`: WebSocket URL để connect
+    - `ai_ws_token`: JWT token cho authentication
+    - `expires_at`: Thời gian hết hạn
+    
+    **Permissions:**
+    - Chỉ teacher của lớp mới được phép
     """
-    service = AttendanceService(db)
-    session = await service.start_session(current_user, request)
-    
-    # Broadcast thông báo phiên bắt đầu
-    await manager.broadcast_to_session(
-        session.id,
-        WSSessionStatus(
-            type="session_status",
-            session_id=session.id,
-            status="ongoing",
-            message="Phiên điểm danh đã bắt đầu"
-        ).model_dump()
-    )
-    
-    return session
+    service = AttendanceAIService(db)
+    return await service.start_session_with_ai(current_user, request)
 
 
 @router.post("/sessions/{session_id}/end", response_model=EndSessionResponse)
@@ -177,10 +181,30 @@ async def get_session_attendance(
     current_user: User = Depends(get_current_user)
 ):
     """
-    Lấy danh sách điểm danh của phiên.
+    Lấy danh sách điểm danh của phiên - Endpoint cho client polling.
     
-    - Giáo viên: Xem tất cả sinh viên
-    - Sinh viên: Chỉ xem nếu thuộc lớp
+    **Use case:**
+    - Client poll endpoint này để cập nhật UI realtime
+    - Thay thế WebSocket từ backend
+    - Chỉ giữ WebSocket với AI-Service để gửi frames
+    
+    **Returns:**
+    - Session info
+    - Attendance records với student details
+    - Statistics (present/late/absent counts)
+    
+    **Permissions:**
+    - Giáo viên: Xem tất cả sinh viên trong lớp
+    - Sinh viên: Chỉ xem nếu thuộc lớp đó
+    
+    **Polling Strategy:**
+    ```javascript
+    // Client nên implement smart polling:
+    - Start: Poll mỗi 2s
+    - Không có update: Tăng interval (exponential backoff) 
+    - Max interval: 10s
+    - Stop khi session status = "finished"
+    ```
     """
     service = AttendanceService(db)
     return await service.get_session_attendance(current_user, session_id)
@@ -208,6 +232,69 @@ async def get_class_sessions(
     """
     service = AttendanceService(db)
     return await service.get_class_sessions(current_user, class_id, status, skip, limit)
+
+
+# ============= Webhook Endpoint (AI-Service Callback) =============
+
+@router.post("/webhook/ai-recognition", response_model=AICallbackResponse)
+async def ai_recognition_webhook(
+    payload: AICallbackPayload,
+    request: Request,
+    x_ai_signature: Optional[str] = Header(None, alias="X-AI-Signature"),
+    db: Session = Depends(get_db)
+):
+    """
+    Webhook endpoint để nhận callback từ AI-Service khi có sinh viên được validate.
+    
+    **AI-Service gọi endpoint này khi:**
+    - Sinh viên pass multi-frame validation
+    - Đủ điều kiện: avg_confidence cao, frame_count đủ, recognition_count đủ
+    
+    **Security:**
+    - Verify HMAC-SHA256 signature với shared secret
+    - Signature trong header `X-AI-Signature`
+    - Reject nếu signature không hợp lệ
+    
+    **Idempotency:**
+    - Không tạo duplicate attendance records
+    - Check existing record trước khi insert
+    
+    **Payload Example:**
+    ```json
+    {
+        "session_id": "ai-session-uuid",
+        "validated_students": [
+            {
+                "student_code": "102220347",
+                "student_name": "Nguyen Van A",
+                "track_id": 1,
+                "avg_confidence": 0.85,
+                "frame_count": 10,
+                "recognition_count": 8,
+                "validation_passed_at": "2025-10-24T10:00:00Z"
+            }
+        ],
+        "timestamp": "2025-10-24T10:00:00Z"
+    }
+    ```
+    
+    **Response:**
+    ```json
+    {
+        "status": "ok",
+        "processed_students": 1,
+        "message": "Processed 1 students successfully"
+    }
+    ```
+    """
+    if not x_ai_signature:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Missing X-AI-Signature header"
+        )
+    
+    service = AttendanceAIService(db)
+    return await service.handle_ai_callback(payload, x_ai_signature)
 
 
 # ============= WebSocket Endpoint =============

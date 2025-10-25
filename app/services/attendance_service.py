@@ -183,8 +183,8 @@ class AttendanceService:
                 detail="Bạn không có quyền với phiên này"
             )
         
-        # Kiểm tra phiên đang ongoing
-        if session.status != SessionStatus.ONGOING:
+        # Kiểm tra phiên đang ongoing hoặc active (AI architecture)
+        if session.status not in [SessionStatus.ONGOING, "active"]:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail=f"Phiên không ở trạng thái đang diễn ra (status: {session.status})"

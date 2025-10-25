@@ -30,10 +30,21 @@ class SessionResponse(BaseModel):
     day_of_week: Optional[int]
     period_range: Optional[str]
     session_index: Optional[int]
+    ai_session_id: Optional[str] = Field(None, description="AI Service session ID")
     created_at: datetime
     
     class Config:
         from_attributes = True
+
+
+class StartSessionWithAIResponse(BaseModel):
+    """Response khi start session với AI-Service."""
+    session_id: int = Field(..., description="Backend session ID")
+    ai_session_id: str = Field(..., description="AI Service session ID")
+    ai_ws_url: str = Field(..., description="WebSocket URL cho AI Service")
+    ai_ws_token: str = Field(..., description="JWT token cho WebSocket authentication")
+    expires_at: datetime = Field(..., description="Thời gian hết hạn của session")
+    status: str = Field(..., description="Status của session")
 
 
 class EndSessionRequest(BaseModel):
@@ -262,3 +273,30 @@ class SessionListResponse(BaseModel):
     """Response danh sách phiên."""
     sessions: List[SessionResponse]
     total: int
+
+
+# ============= AI Service Callback Schemas =============
+
+class AIValidatedStudent(BaseModel):
+    """Thông tin sinh viên đã được AI Service validate."""
+    student_code: str = Field(..., description="Mã sinh viên")
+    student_name: str = Field(..., description="Tên sinh viên")
+    track_id: int = Field(..., description="Tracking ID")
+    avg_confidence: float = Field(..., description="Độ tin cậy trung bình")
+    frame_count: int = Field(..., description="Số frame đã xử lý")
+    recognition_count: int = Field(..., description="Số lần nhận diện thành công")
+    validation_passed_at: datetime = Field(..., description="Thời điểm pass validation")
+
+
+class AICallbackPayload(BaseModel):
+    """Payload từ AI Service callback."""
+    session_id: str = Field(..., description="AI session ID")
+    validated_students: List[AIValidatedStudent] = Field(..., description="Danh sách sinh viên đã validate")
+    timestamp: datetime = Field(..., description="Thời gian callback")
+
+
+class AICallbackResponse(BaseModel):
+    """Response cho AI Service callback."""
+    status: str = Field(..., description="Status của callback")
+    processed_students: int = Field(..., description="Số sinh viên đã xử lý")
+    message: str = Field(..., description="Thông báo")
