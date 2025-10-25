@@ -13,6 +13,10 @@ from app.models.class_member import ClassMember
 from app.models.teacher import Teacher
 from app.models.student import Student
 from app.models.user import User
+from app.models.department import Department  # ✅ Add this
+from app.models.attendance_record import AttendanceRecord  # ✅ Add this
+from app.models.attendance_session import AttendanceSession  # ✅ Add this
+from app.services.file_service import FileService  # ✅ Add this
 
 
 class TeacherClassService:
@@ -578,4 +582,143 @@ class TeacherClassService:
         return {
             "success": True,
             "message": "Class deactivated successfully"
+        }
+    
+    @staticmethod
+    async def get_class_students_details(
+        db: Session,
+        user,
+        class_id: int
+    ) -> Dict:
+        """
+        Get detailed information of all students in a class (Teacher only).
+        
+        Includes:
+        - Personal information (name, email, phone, avatar, date_of_birth)
+        - Academic information (student_code, department, academic_year)
+        - Class enrollment info (joined_at)
+        - Attendance statistics
+        """
+        
+        # Verify teacher
+        teacher = db.query(Teacher).filter(Teacher.user_id == user.id).first()
+        if not teacher:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Only teachers can access student details"
+            )
+        
+        # Verify class exists and belongs to teacher
+        cls = db.query(Class).filter(
+            Class.id == class_id,
+            Class.teacher_id == teacher.id
+        ).first()
+        
+        if not cls:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Class not found or you don't have permission to access it"
+            )
+        
+        # Get all class members with student and user info
+        class_members = db.query(ClassMember).filter(
+            ClassMember.class_id == class_id
+        ).all()
+        
+        students_data = []
+        total_attendance_rate = 0.0
+        verified_count = 0
+        
+        for member in class_members:
+            # Get student
+            student = db.query(Student).filter(Student.id == member.student_id).first()
+            if not student:
+                continue
+            
+            # Get user info
+            user_info = db.query(User).filter(User.id == student.user_id).first()
+            if not user_info:
+                continue
+            
+            # Get department info
+            department_name = None
+            if student.department_id:
+                department = db.query(Department).filter(Department.id == student.department_id).first()
+                department_name = department.name if department else None
+            
+            # ✅ Calculate attendance statistics - JOIN through AttendanceSession
+            attendance_records = db.query(AttendanceRecord).join(
+                AttendanceSession, AttendanceRecord.session_id == AttendanceSession.id
+            ).filter(
+                AttendanceSession.class_id == class_id,
+                AttendanceRecord.student_id == student.id
+            ).all()
+            
+            total_sessions = len(attendance_records)
+            present_count = sum(1 for record in attendance_records if record.status == "present")
+            absent_count = sum(1 for record in attendance_records if record.status == "absent")
+            excused_count = sum(1 for record in attendance_records if record.status == "excused")
+            attendance_rate = (present_count + excused_count) / total_sessions * 100 if total_sessions > 0 else 0.0
+            
+            total_attendance_rate += attendance_rate
+            
+            if student.is_verified:
+                verified_count += 1
+            
+            # Get avatar URL if exists
+            avatar_url = None
+            if user_info.avatar_url:
+                try:
+                    file_service = FileService(db)
+                    avatar_url = file_service.get_file_url(user_info.avatar_url)
+                except Exception as e:
+                    print(f"Warning: Failed to get avatar URL for user {user_info.id}: {str(e)}")
+            
+            students_data.append({
+                "id": student.id,
+                "studentId": student.student_code,
+                "fullName": user_info.full_name,
+                "email": user_info.email,
+                "phone": user_info.phone,
+                "avatar": avatar_url,
+                "dateOfBirth": student.date_of_birth.isoformat() if student.date_of_birth else None,
+                "department": department_name,
+                "academicYear": student.academic_year,
+                "isVerified": student.is_verified,
+                "joinedAt": member.joined_at.isoformat() + "Z",
+                "attendanceStats": {
+                    "totalSessions": total_sessions,
+                    "presentCount": present_count,
+                    "absentCount": absent_count,
+                    "excusedCount": excused_count,  # ✅ Added excused count
+                    "attendanceRate": round(attendance_rate, 2)
+                }
+            })
+        
+        # Calculate summary statistics
+        total_students = len(students_data)
+        average_attendance_rate = total_attendance_rate / total_students if total_students > 0 else 0.0
+        
+        return {
+            "success": True,
+            "data": {
+                "class": {
+                    "id": cls.id,
+                    "className": cls.class_name,
+                    "classCode": cls.class_code,
+                    "totalStudents": total_students
+                },
+                "students": students_data,
+                "summary": {
+                    "totalStudents": total_students,
+                    "totalSessions": max(
+                        (db.query(AttendanceSession).filter(
+                            AttendanceSession.class_id == class_id
+                        ).count()), 0
+                    ),
+                    "verifiedStudents": verified_count,
+                    "unverifiedStudents": total_students - verified_count,
+                    "averageAttendanceRate": round(average_attendance_rate, 2)
+                }
+            }
         }

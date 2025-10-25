@@ -7,10 +7,11 @@ from app.core.dependencies import get_current_user
 from app.models.user import User
 from app.schemas.class_schema import (
     CreateClassRequest,
-    UpdateClassRequest,
     CreateClassResponse,
     GetClassesListResponse,
-    GetClassDetailsResponse
+    GetClassDetailsResponse,
+    UpdateClassRequest,
+    ClassStudentsDetailResponse,  # ✅ Add this import
 )
 from app.services.teacherClass_service import TeacherClassService
 
@@ -70,4 +71,25 @@ async def delete_class(
 ):
     """Deactivate a class (soft delete)."""
     result = await TeacherClassService.delete_class(db, current_user, class_id)
+    return result
+
+
+@router.get("/{class_id}/students/details", response_model=ClassStudentsDetailResponse)
+async def get_class_students_details(
+    class_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """
+    Get detailed information of all students in a class (Teacher only).
+
+    - Requires: Teacher role, class ownership
+    - Path param: class_id
+    - Returns: Complete student information including:
+        * Personal info (name, email, phone, avatar, date_of_birth)
+        * Academic info (student_code, department, academic_year)
+        * Enrollment info (joined_at, verification status)
+        * Attendance statistics (sessions, attendance rate)
+    """
+    result = await TeacherClassService.get_class_students_details(db, current_user, class_id)
     return result
