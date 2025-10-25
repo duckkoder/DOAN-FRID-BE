@@ -28,7 +28,6 @@ from app.schemas.attendance import (
     AICallbackResponse
 )
 from app.services.attendance_service import AttendanceService
-from app.services.attendance_ai_service import AttendanceAIService
 
 
 router = APIRouter(prefix="/attendance", tags=["Attendance"])
@@ -109,7 +108,7 @@ async def start_attendance_session(
     **Permissions:**
     - Chỉ teacher của lớp mới được phép
     """
-    service = AttendanceAIService(db)
+    service = AttendanceService(db)
     return await service.start_session_with_ai(current_user, request)
 
 
@@ -150,28 +149,18 @@ async def recognize_frame(
     current_user: User = Depends(get_current_user)
 ):
     """
-    Nhận diện khuôn mặt từ frame camera.
+    [DEPRECATED] Nhận diện khuôn mặt từ frame camera (HTTP - Legacy).
     
-    - Nhận frame dạng base64
-    - Gọi AI Service để nhận diện
-    - Tự động tạo bản ghi điểm danh
-    - Broadcast real-time update qua WebSocket
+    ⚠️ Endpoint này đã deprecated. Vui lòng sử dụng WebSocket endpoint thay thế:
+    - POST /sessions/start → Nhận WebSocket URL
+    - Connect WebSocket → Gửi frames real-time
+    
+    Endpoint này sẽ bị xóa trong phiên bản tương lai.
     """
-    service = AttendanceService(db)
-    result = await service.recognize_frame(current_user, request)
-    
-    # Broadcast các sinh viên vừa được nhận diện qua WebSocket
-    for student in result.students_recognized:
-        await manager.broadcast_to_session(
-            request.session_id,
-            WSAttendanceUpdate(
-                type="attendance_update",
-                session_id=request.session_id,
-                student=student
-            ).model_dump()
-        )
-    
-    return result
+    raise HTTPException(
+        status_code=status.HTTP_410_GONE,
+        detail="This endpoint is deprecated. Please use WebSocket for real-time face recognition."
+    )
 
 
 @router.get("/sessions/{session_id}", response_model=SessionAttendanceListResponse)
@@ -293,7 +282,7 @@ async def ai_recognition_webhook(
             detail="Missing X-AI-Signature header"
         )
     
-    service = AttendanceAIService(db)
+    service = AttendanceService(db)
     return await service.handle_ai_callback(payload, x_ai_signature)
 
 
