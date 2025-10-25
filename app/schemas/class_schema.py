@@ -269,3 +269,73 @@ class JoinClassResponse(BaseModel):
     success: bool = True
     data: Dict[str, Any]
     message: str = "Joined class successfully"
+
+
+class StudentDetailInClass(BaseModel):
+    """Detailed student info in class with personal information."""
+    id: int  # student.id
+    studentId: str = Field(..., alias="studentId")  # student.student_code
+    fullName: str = Field(..., alias="fullName")  # user.full_name
+    email: str  # user.email
+    phone: Optional[str] = None  # user.phone
+    avatar: Optional[str] = None  # user.avatar
+    dateOfBirth: Optional[str] = Field(None, alias="dateOfBirth")  # student.date_of_birth
+    department: Optional[str] = None  # department.name
+    academicYear: Optional[str] = Field(None, alias="academicYear")  # student.academic_year
+    isVerified: bool = Field(..., alias="isVerified")  # student.is_verified
+    joinedAt: str = Field(..., alias="joinedAt")  # class_member.joined_at
+    attendanceStats: Optional[Dict] = Field(None, alias="attendanceStats")  # Attendance statistics
+    
+    model_config = {"populate_by_name": True}
+
+
+class ClassStudentsDetailResponse(BaseModel):
+    """Response for GET /teacher/classes/{classId}/students/details."""
+    success: bool = True
+    data: Dict[str, Any]
+    
+    model_config = {
+        "json_schema_extra": {
+            "examples": [
+                {
+                    "success": True,
+                    "data": {
+                        "class": {
+                            "id": 1,
+                            "className": "Java Programming",
+                            "classCode": "ABC123XYZ",
+                            "totalStudents": 25
+                        },
+                        "students": [
+                            {
+                                "id": 10,
+                                "studentId": "SV001",
+                                "fullName": "Nguyen Van A",
+                                "email": "student1@example.com",
+                                "phone": "0123456789",
+                                "avatar": "https://...",
+                                "dateOfBirth": "2002-01-15",
+                                "department": "Computer Science",
+                                "academicYear": "2023-2024",
+                                "isVerified": True,
+                                "joinedAt": "2024-09-01T10:00:00Z",
+                                "attendanceStats": {
+                                    "totalSessions": 20,
+                                    "presentCount": 18,
+                                    "absentCount": 2,
+                                    "lateCount": 1,
+                                    "attendanceRate": 90.0
+                                }
+                            }
+                        ],
+                        "summary": {
+                            "totalStudents": 25,
+                            "verifiedStudents": 23,
+                            "unverifiedStudents": 2,
+                            "averageAttendanceRate": 85.5
+                        }
+                    }
+                }
+            ]
+        }
+    }
