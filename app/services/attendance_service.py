@@ -291,16 +291,11 @@ class AttendanceService:
             for member in class_members
         }
         
-        # DEBUG: Log để kiểm tra
-        print(f"[DEBUG] AI Service returned {len(ai_result.get('faces', []))} faces")
-        print(f"[DEBUG] Students in class: {list(student_map.keys())}")
-        
         # Xử lý kết quả nhận diện
         recognized_students = []
         detections_info = []  # Thêm list để lưu thông tin detections
         
         for face in ai_result.get("faces", []):
-            print(f"[DEBUG] Processing face: person_name={face.get('person_name')}, confidence={face.get('recognition_confidence')}")
             person_name = face.get("person_name")
             recognition_confidence = face.get("recognition_confidence")
             bbox = face.get("bbox", [])
@@ -314,7 +309,6 @@ class AttendanceService:
             # Tạo detection info
             if student:
                 # Trường hợp 1: Sinh viên TRONG lớp
-                print(f"[DEBUG] Student FOUND: {student.student_code} - {student.user.full_name}")
                 detection = DetectionInfo(
                     bbox=bbox,
                     confidence=detection_confidence,
@@ -326,7 +320,6 @@ class AttendanceService:
                 )
             else:
                 # Trường hợp 2: Unknown (bao gồm cả người không trong lớp)
-                print(f"[DEBUG] Unknown face: person_name={person_name}")
                 detection = DetectionInfo(
                     bbox=bbox,
                     confidence=detection_confidence,
@@ -599,9 +592,6 @@ class AttendanceService:
             ai_session_id = AttendanceService._ai_session_map.get(backend_session_id)
             if ai_session_id:
                 payload["session_id"] = ai_session_id
-                print(f"[DEBUG] Using AI session: {ai_session_id} for backend session: {backend_session_id}")
-            else:
-                print(f"[WARNING] No AI session mapping found for backend session: {backend_session_id}")
         
         try:
             async with httpx.AsyncClient(timeout=30.0) as client:
@@ -677,15 +667,9 @@ class AttendanceService:
                 if not ai_session_data.get("embeddings_loaded", False):
                     raise Exception("AI-Service failed to load embeddings to VRAM")
                 
-                # Log success
-                ai_session_id = ai_session_data.get('session_id')
-                print(f"✅ AI-Service session created: {ai_session_id}")
-                print(f"   - Students: {len(student_codes)}")
-                print(f"   - Embeddings loaded: {ai_session_data.get('embeddings_loaded')}")
-                
                 # Store mapping: backend_session_id -> ai_session_id
+                ai_session_id = ai_session_data.get('session_id')
                 AttendanceService._ai_session_map[session_id] = ai_session_id
-                print(f"   - Mapped: backend_session[{session_id}] -> ai_session[{ai_session_id}]")
                 
                 return ai_session_data
         

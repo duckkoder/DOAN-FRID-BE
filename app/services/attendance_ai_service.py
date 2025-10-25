@@ -250,14 +250,32 @@ class AttendanceAIService:
         import json
         
         # 1. Verify HMAC signature
+        # Must match AI-Service's signature generation (separators=(',', ':'))
+        payload_dict = payload.model_dump()  # Convert Pydantic to dict
+        
+        # Convert datetime to isoformat to match AI-Service
+        if isinstance(payload_dict.get('timestamp'), datetime):
+            payload_dict['timestamp'] = payload_dict['timestamp'].isoformat()
+        
+        for student in payload_dict.get('validated_students', []):
+            if isinstance(student.get('validation_passed_at'), datetime):
+                student['validation_passed_at'] = student['validation_passed_at'].isoformat()
+        
+        payload_str = json.dumps(payload_dict, separators=(',', ':'))  # Match AI-Service format
+        
         expected_signature = hmac.new(
             settings.AI_SERVICE_SECRET.encode(),
-            json.dumps(payload.dict(), default=str).encode(),
+            payload_str.encode(),
             hashlib.sha256
         ).hexdigest()
         
         if not hmac.compare_digest(signature, expected_signature):
-            logger.warning("Invalid HMAC signature in AI callback")
+            logger.warning("Invalid HMAC signature in AI callback",
+                          extra={
+                              "received_signature": signature,
+                              "expected_signature": expected_signature,
+                              "payload_preview": payload_str[:200]
+                          })
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 detail="Invalid signature"
@@ -322,9 +340,9 @@ class AttendanceAIService:
                 session_id=session.id,
                 student_id=student.id,
                 status=attendance_status,
-                check_in_time=validated_student.validation_passed_at,
+                recorded_at=validated_student.validation_passed_at,
                 confidence_score=validated_student.avg_confidence,
-                recognition_method="AI"
+                notes=f"AI-validated (track_id={validated_student.track_id}, frames={validated_student.frame_count})"
             )
             
             self.db.add(new_record)
