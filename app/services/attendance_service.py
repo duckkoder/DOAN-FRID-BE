@@ -43,10 +43,10 @@ class AttendanceService:
         
         Flow:
         1. Kiểm tra quyền và validate
-        2. Tạo session trong DB với status="pending"
+        2. Tạo session trong DB với status="scheduled"
         3. Generate JWT token cho WebSocket
         4. Call AI-Service để tạo session
-        5. Update ai_session_id và status="active"
+        5. Update ai_session_id và status="ongoing"
         6. Return session info + WebSocket URL + token
         
         Args:
@@ -92,10 +92,10 @@ class AttendanceService:
                 detail="Bạn không có quyền với lớp học này"
             )
         
-        # 4. Kiểm tra không có phiên nào đang active
+        # 4. Kiểm tra không có phiên nào đang ongoing
         ongoing_session = self.db.query(AttendanceSession).filter(
             AttendanceSession.class_id == request.class_id,
-            AttendanceSession.status.in_(["pending", "active"])
+            AttendanceSession.status.in_([SessionStatus.SCHEDULED.value, SessionStatus.ONGOING.value])
         ).first()
         
         if ongoing_session:
@@ -123,12 +123,12 @@ class AttendanceService:
                 detail="Lớp học không có sinh viên nào"
             )
         
-        # 6. Tạo session trong DB với status="pending"
+        # 6. Tạo session trong DB với status="scheduled"
         new_session = AttendanceSession(
             class_id=request.class_id,
             session_name=request.session_name or f"Điểm danh {datetime.now().strftime('%d/%m/%Y %H:%M')}",
             start_time=datetime.utcnow(),
-            status="pending",  # Pending cho đến khi AI-Service confirm
+            status=SessionStatus.SCHEDULED.value,  # Scheduled cho đến khi AI-Service confirm
             late_threshold_minutes=request.late_threshold_minutes,
             location=request.location,
             allow_late_checkin=True,
@@ -192,9 +192,9 @@ class AttendanceService:
                 detail=f"Không thể khởi tạo AI-Service: {str(e)}"
             )
         
-        # 9. Update ai_session_id và status="active"
+        # 9. Update ai_session_id và status="ongoing"
         new_session.ai_session_id = ai_session_id
-        new_session.status = "active"
+        new_session.status = SessionStatus.ONGOING.value
         self.db.commit()
         self.db.refresh(new_session)
         
@@ -284,7 +284,7 @@ class AttendanceService:
         # 2. Tìm session
         session = self.db.query(AttendanceSession).filter(
             AttendanceSession.ai_session_id == payload.session_id,
-            AttendanceSession.status == "active"
+            AttendanceSession.status == SessionStatus.ONGOING.value
         ).first()
         
         if not session:
@@ -411,8 +411,8 @@ class AttendanceService:
                 detail="Bạn không có quyền với phiên này"
             )
         
-        # Kiểm tra phiên đang active
-        if session.status not in ["ongoing", "active"]:
+        # Kiểm tra phiên đang ongoing
+        if session.status != SessionStatus.ONGOING.value:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail=f"Phiên không ở trạng thái đang diễn ra (status: {session.status})"
@@ -446,7 +446,7 @@ class AttendanceService:
                 self.db.add(new_record)
         
         # Cập nhật trạng thái phiên
-        session.status = "finished"
+        session.status = SessionStatus.FINISHED.value
         session.end_time = datetime.utcnow()
         self.db.commit()
         self.db.refresh(session)
