@@ -12,7 +12,8 @@ from app.models.class_member import ClassMember
 from app.models.attendance_session import AttendanceSession
 from app.models.attendance_record import AttendanceRecord
 from app.models.student import Student
-from app.core.enums import SessionStatus, AttendanceStatus, UserRole
+from app.models.leave_request import LeaveRequest
+from app.core.enums import SessionStatus, AttendanceStatus, UserRole, RequestStatus
 from app.core.config import settings
 from app.core.security import create_websocket_token
 from app.services.ai_service_client import ai_service_client
@@ -329,11 +330,9 @@ class AttendanceService:
                 )
                 continue
             
-            # Tính status dựa vào thời gian
-            time_diff = datetime.utcnow() - session.start_time
-            is_late = time_diff.total_seconds() / 60 > session.late_threshold_minutes
-            
-            attendance_status = AttendanceStatus.LATE if is_late else AttendanceStatus.PRESENT
+            # Tất cả sinh viên được nhận diện đều đánh dấu là PRESENT
+            # Không có logic late (đi muộn)
+            attendance_status = AttendanceStatus.PRESENT
             
             # Tạo attendance record
             new_record = AttendanceRecord(
@@ -445,6 +444,49 @@ class AttendanceService:
                 )
                 self.db.add(new_record)
         
+        # Commit để có các bản ghi absent
+        self.db.commit()
+        
+        # Xử lý đơn xin nghỉ đã được chấp nhận
+        # Lấy tất cả records có status ABSENT
+        absent_records = self.db.query(AttendanceRecord).filter(
+            AttendanceRecord.session_id == session_id,
+            AttendanceRecord.status == AttendanceStatus.ABSENT
+        ).all()
+        
+        if absent_records:
+            # Lấy thông tin về ngày và thời gian của session
+            session_date = session.start_time.date()
+            
+            # Tìm các đơn xin nghỉ đã được chấp nhận cho lớp này trong ngày này
+            approved_leave_requests = self.db.query(LeaveRequest).filter(
+                LeaveRequest.class_id == session.class_id,
+                LeaveRequest.status == RequestStatus.APPROVED.value,
+                LeaveRequest.leave_date >= datetime.combine(session_date, datetime.min.time()),
+                LeaveRequest.leave_date < datetime.combine(session_date, datetime.max.time())
+            ).all()
+            
+            # Tạo map student_id -> leave_request để tra cứu nhanh
+            approved_student_ids = {lr.student_id: lr for lr in approved_leave_requests}
+            
+            # Cập nhật status cho các sinh viên có đơn được duyệt
+            excused_count = 0
+            for record in absent_records:
+                if record.student_id in approved_student_ids:
+                    leave_request = approved_student_ids[record.student_id]
+                    
+                    # Kiểm tra thêm về time_slot nếu cần (tùy chọn)
+                    # Có thể match với period_range hoặc session_index
+                    # Ở đây tôi cập nhật tất cả absent có đơn trong ngày
+                    
+                    record.status = AttendanceStatus.EXCUSED
+                    record.notes = f"Đã có đơn xin nghỉ được chấp nhận (ID: {leave_request.id})"
+                    excused_count += 1
+                    logger.info(
+                        f"Updated student {record.student_id} from ABSENT to EXCUSED "
+                        f"based on approved leave request {leave_request.id}"
+                    )
+        
         # Cập nhật trạng thái phiên
         session.status = SessionStatus.FINISHED.value
         session.end_time = datetime.utcnow()
@@ -462,10 +504,11 @@ class AttendanceService:
         ).all()
         
         present_count = sum(1 for r in records if r.status == AttendanceStatus.PRESENT)
-        late_count = sum(1 for r in records if r.status == AttendanceStatus.LATE)
         absent_count = sum(1 for r in records if r.status == AttendanceStatus.ABSENT)
+        excused_count = sum(1 for r in records if r.status == AttendanceStatus.EXCUSED)
         
-        attendance_rate = (present_count + late_count) / total_students * 100 if total_students > 0 else 0
+        # Chỉ tính present, không tính late vì không có trạng thái late
+        attendance_rate = present_count / total_students * 100 if total_students > 0 else 0
         
         from app.schemas.attendance import SessionResponse
         
@@ -473,8 +516,8 @@ class AttendanceService:
             session=SessionResponse.model_validate(session),
             total_students=total_students,
             present_count=present_count,
-            late_count=late_count,
             absent_count=absent_count,
+            excused_count=excused_count,
             attendance_rate=round(attendance_rate, 2)
         )
     
@@ -546,15 +589,15 @@ class AttendanceService:
         total_students = len(class_members)
         
         present_count = sum(1 for r in records if r.status == AttendanceStatus.PRESENT)
-        late_count = sum(1 for r in records if r.status == AttendanceStatus.LATE)
         absent_count = sum(1 for r in records if r.status == AttendanceStatus.ABSENT)
+        excused_count = sum(1 for r in records if r.status == AttendanceStatus.EXCUSED)
         
         statistics = {
             "total_students": total_students,
             "present_count": present_count,
-            "late_count": late_count,
             "absent_count": absent_count,
-            "attendance_rate": round((present_count + late_count) / total_students * 100, 2) if total_students > 0 else 0
+            "excused_count": excused_count,
+            "attendance_rate": round(present_count / total_students * 100, 2) if total_students > 0 else 0
         }
         
         return SessionAttendanceListResponse(
@@ -650,16 +693,16 @@ class AttendanceService:
             total_students = len(class_members)
             
             present_count = sum(1 for r in records if r.status == AttendanceStatus.PRESENT)
-            late_count = sum(1 for r in records if r.status == AttendanceStatus.LATE)
             absent_count = sum(1 for r in records if r.status == AttendanceStatus.ABSENT)
+            excused_count = sum(1 for r in records if r.status == AttendanceStatus.EXCUSED)
             
             session_data = SessionResponse.model_validate(session).model_dump()
             session_data["statistics"] = {
                 "total_students": total_students,
                 "present_count": present_count,
-                "late_count": late_count,
                 "absent_count": absent_count,
-                "attendance_rate": round((present_count + late_count) / total_students * 100, 2) if total_students > 0 else 0
+                "excused_count": excused_count,
+                "attendance_rate": round(present_count / total_students * 100, 2) if total_students > 0 else 0
             }
             session_responses.append(session_data)
         

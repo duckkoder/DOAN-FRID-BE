@@ -57,9 +57,9 @@ class EndSessionResponse(BaseModel):
     session: SessionResponse
     total_students: int
     present_count: int
-    late_count: int
     absent_count: int
-    attendance_rate: float
+    excused_count: int = Field(default=0, description="Số sinh viên vắng có phép (đã xin nghỉ được duyệt)")
+    attendance_rate: float  # Chỉ tính present / total
 
 
 # ============= Recognition Schemas =============
@@ -86,7 +86,7 @@ class RecognizedStudent(BaseModel):
     student_id: int
     student_code: str
     full_name: str
-    status: str  # present hoặc late
+    status: str  # present (luôn là present khi được nhận diện)
     confidence_score: float
     recorded_at: datetime
 
@@ -140,7 +140,7 @@ class WSStudentStatusUpdate(BaseModel):
     type: str = "student_status_update"
     session_id: int
     student_id: int
-    status: str  # pending_confirmation, present, late, etc.
+    status: str  # present, absent, excused
     confidence_score: Optional[float] = None
     message: str
     recorded_at: datetime
@@ -153,7 +153,7 @@ class WSConfirmationUpdate(BaseModel):
     student_id: int
     student_code: str
     full_name: str
-    status: str  # present, late, rejected
+    status: str  # present, absent, excused
     confirmed_by: Optional[str] = None
     confirmed_at: Optional[datetime] = None
 
@@ -170,7 +170,7 @@ class WSSessionStatus(BaseModel):
 
 class ConfirmAttendanceRequest(BaseModel):
     """Request xác nhận điểm danh."""
-    status: str = Field(default="present", description="present hoặc late")
+    status: str = Field(default="present", description="present (có mặt)")
     notes: Optional[str] = Field(None, description="Ghi chú")
 
 
@@ -236,7 +236,7 @@ class MyAttendanceStatusResponse(BaseModel):
 class StudentAttendanceStatus(BaseModel):
     """Trạng thái điểm danh của sinh viên."""
     is_present: bool
-    status: str  # present, late, absent
+    status: str  # present, absent, excused
     recorded_at: Optional[datetime]
     confidence_score: Optional[float]
 
