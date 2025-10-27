@@ -19,6 +19,9 @@ class AttendanceSession(BaseModel):
     late_threshold_minutes = Column(Integer, default=15)
     location = Column(String(255), nullable=True)
     
+    # AI Service Integration
+    ai_session_id = Column(String(255), nullable=True, unique=True, comment="AI Service session ID for face recognition")
+    
     # Schedule information fields
     day_of_week = Column(Integer, nullable=True, comment="Day of week (0=Sunday, 1=Monday, ..., 6=Saturday)")
     period_range = Column(String(50), nullable=True, comment="Period range (e.g., '1-3' or '6-7')")

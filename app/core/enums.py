@@ -24,11 +24,19 @@ class SessionStatus(str, Enum):
 
 
 class AttendanceStatus(str, Enum):
-    """Attendance record status enumeration."""
+    """Attendance record status enumeration.
+    
+    Chỉ có 3 trạng thái:
+    - PRESENT: Có mặt (được nhận diện hoặc xác nhận)
+    - ABSENT: Vắng không phép
+    - EXCUSED: Vắng có phép (có đơn xin nghỉ được duyệt)
+    
+    KHÔNG có trạng thái LATE (đi muộn)
+    """
     PRESENT = "present"
     ABSENT = "absent"
-    LATE = "late"
     EXCUSED = "excused"
+    LATE = "late"  # DEPRECATED - Không sử dụng, chỉ giữ lại để tương thích database
 
 
 class RequestStatus(str, Enum):

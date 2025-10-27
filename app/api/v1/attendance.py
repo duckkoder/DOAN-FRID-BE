@@ -1,5 +1,5 @@
-"""Attendance endpoints with WebSocket support for real-time updates."""
-from fastapi import APIRouter, Depends, WebSocket, WebSocketDisconnect, status, HTTPException
+"""Attendance endpoints with AI-Service integration."""
+from fastapi import APIRouter, Depends, WebSocket, WebSocketDisconnect, status, HTTPException, Request, Header
 from sqlalchemy.orm import Session
 from typing import Dict, Set, Any, Optional
 from datetime import datetime
@@ -16,13 +16,13 @@ from app.schemas.attendance import (
     SessionResponse,
     EndSessionRequest,
     EndSessionResponse,
-    RecognizeFrameRequest,
-    RecognizeFrameResponse,
     SessionAttendanceListResponse,
     WSAttendanceUpdate,
     WSSessionStatus,
-    StudentCurrentSessionResponse,
-    WSStudentAttendanceUpdate
+    WSStudentAttendanceUpdate,
+    StartSessionWithAIResponse,
+    AICallbackPayload,
+    AICallbackResponse
 )
 from app.services.attendance_service import AttendanceService
 
@@ -79,34 +79,34 @@ manager = ConnectionManager()
 
 # ============= REST API Endpoints =============
 
-@router.post("/sessions/start", response_model=SessionResponse, status_code=status.HTTP_201_CREATED)
+@router.post("/sessions/start", response_model=StartSessionWithAIResponse, status_code=status.HTTP_201_CREATED)
 async def start_attendance_session(
     request: StartSessionRequest,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
     """
-    Bắt đầu phiên điểm danh mới.
+    Bắt đầu phiên điểm danh mới với AI-Service.
     
-    - Chỉ giáo viên có thể bắt đầu phiên
-    - Kiểm tra quyền sở hữu lớp
-    - Không được có phiên nào đang chạy
+    **Flow:**
+    1. Backend tạo session với status="pending"
+    2. Backend gọi AI-Service để tạo session
+    3. Backend nhận ai_session_id, update status="active"
+    4. Client nhận WebSocket URL + JWT token
+    5. Client connect trực tiếp tới AI-Service WebSocket
+    
+    **Returns:**
+    - `session_id`: Backend session ID
+    - `ai_session_id`: AI Service session ID  
+    - `ai_ws_url`: WebSocket URL để connect
+    - `ai_ws_token`: JWT token cho authentication
+    - `expires_at`: Thời gian hết hạn
+    
+    **Permissions:**
+    - Chỉ teacher của lớp mới được phép
     """
     service = AttendanceService(db)
-    session = await service.start_session(current_user, request)
-    
-    # Broadcast thông báo phiên bắt đầu
-    await manager.broadcast_to_session(
-        session.id,
-        WSSessionStatus(
-            type="session_status",
-            session_id=session.id,
-            status="ongoing",
-            message="Phiên điểm danh đã bắt đầu"
-        ).model_dump()
-    )
-    
-    return session
+    return await service.start_session_with_ai(current_user, request)
 
 
 @router.post("/sessions/{session_id}/end", response_model=EndSessionResponse)
@@ -139,37 +139,6 @@ async def end_attendance_session(
     return result
 
 
-@router.post("/recognize-frame", response_model=RecognizeFrameResponse)
-async def recognize_frame(
-    request: RecognizeFrameRequest,
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user)
-):
-    """
-    Nhận diện khuôn mặt từ frame camera.
-    
-    - Nhận frame dạng base64
-    - Gọi AI Service để nhận diện
-    - Tự động tạo bản ghi điểm danh
-    - Broadcast real-time update qua WebSocket
-    """
-    service = AttendanceService(db)
-    result = await service.recognize_frame(current_user, request)
-    
-    # Broadcast các sinh viên vừa được nhận diện qua WebSocket
-    for student in result.students_recognized:
-        await manager.broadcast_to_session(
-            request.session_id,
-            WSAttendanceUpdate(
-                type="attendance_update",
-                session_id=request.session_id,
-                student=student
-            ).model_dump()
-        )
-    
-    return result
-
-
 @router.get("/sessions/{session_id}", response_model=SessionAttendanceListResponse)
 async def get_session_attendance(
     session_id: int,
@@ -177,10 +146,30 @@ async def get_session_attendance(
     current_user: User = Depends(get_current_user)
 ):
     """
-    Lấy danh sách điểm danh của phiên.
+    Lấy danh sách điểm danh của phiên - Endpoint cho client polling.
     
-    - Giáo viên: Xem tất cả sinh viên
-    - Sinh viên: Chỉ xem nếu thuộc lớp
+    **Use case:**
+    - Client poll endpoint này để cập nhật UI realtime
+    - Thay thế WebSocket từ backend
+    - Chỉ giữ WebSocket với AI-Service để gửi frames
+    
+    **Returns:**
+    - Session info
+    - Attendance records với student details
+    - Statistics (present/late/absent counts)
+    
+    **Permissions:**
+    - Giáo viên: Xem tất cả sinh viên trong lớp
+    - Sinh viên: Chỉ xem nếu thuộc lớp đó
+    
+    **Polling Strategy:**
+    ```javascript
+    // Client nên implement smart polling:
+    - Start: Poll mỗi 2s
+    - Không có update: Tăng interval (exponential backoff) 
+    - Max interval: 10s
+    - Stop khi session status = "finished"
+    ```
     """
     service = AttendanceService(db)
     return await service.get_session_attendance(current_user, session_id)
@@ -208,6 +197,69 @@ async def get_class_sessions(
     """
     service = AttendanceService(db)
     return await service.get_class_sessions(current_user, class_id, status, skip, limit)
+
+
+# ============= Webhook Endpoint (AI-Service Callback) =============
+
+@router.post("/webhook/ai-recognition", response_model=AICallbackResponse)
+async def ai_recognition_webhook(
+    payload: AICallbackPayload,
+    request: Request,
+    x_ai_signature: Optional[str] = Header(None, alias="X-AI-Signature"),
+    db: Session = Depends(get_db)
+):
+    """
+    Webhook endpoint để nhận callback từ AI-Service khi có sinh viên được validate.
+    
+    **AI-Service gọi endpoint này khi:**
+    - Sinh viên pass multi-frame validation
+    - Đủ điều kiện: avg_confidence cao, frame_count đủ, recognition_count đủ
+    
+    **Security:**
+    - Verify HMAC-SHA256 signature với shared secret
+    - Signature trong header `X-AI-Signature`
+    - Reject nếu signature không hợp lệ
+    
+    **Idempotency:**
+    - Không tạo duplicate attendance records
+    - Check existing record trước khi insert
+    
+    **Payload Example:**
+    ```json
+    {
+        "session_id": "ai-session-uuid",
+        "validated_students": [
+            {
+                "student_code": "102220347",
+                "student_name": "Nguyen Van A",
+                "track_id": 1,
+                "avg_confidence": 0.85,
+                "frame_count": 10,
+                "recognition_count": 8,
+                "validation_passed_at": "2025-10-24T10:00:00Z"
+            }
+        ],
+        "timestamp": "2025-10-24T10:00:00Z"
+    }
+    ```
+    
+    **Response:**
+    ```json
+    {
+        "status": "ok",
+        "processed_students": 1,
+        "message": "Processed 1 students successfully"
+    }
+    ```
+    """
+    if not x_ai_signature:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Missing X-AI-Signature header"
+        )
+    
+    service = AttendanceService(db)
+    return await service.handle_ai_callback(payload, x_ai_signature)
 
 
 # ============= WebSocket Endpoint =============
@@ -396,231 +448,4 @@ async def get_current_session_attendance_for_student(
         }
     }
 
-@router.get("/classes/{class_id}/current-session", response_model=StudentCurrentSessionResponse)
-async def get_current_session_for_student(
-    class_id: int,
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user)
-):
-    """
-    [DEPRECATED] Use /current-session-attendance instead.
-    
-    Sinh viên check xem lớp có phiên điểm danh đang diễn ra không.
-    Kèm theo trạng thái điểm danh của sinh viên đó.
-    
-    Returns:
-        - has_active_session: bool
-        - session: Session info nếu có
-        - my_status: Trạng thái điểm danh của sinh viên
-    """
-    # 1. Tìm session đang ongoing
-    session = db.query(AttendanceSession).filter(
-        AttendanceSession.class_id == class_id,
-        AttendanceSession.status == "ongoing"
-    ).first()
-    
-    if not session:
-        return StudentCurrentSessionResponse(
-            has_active_session=False,
-            session=None,
-            my_status=None
-        )
-    
-    # 2. Lấy thông tin student từ user
-    student = db.query(Student).filter(
-        Student.user_id == current_user.id
-    ).first()
-    
-    if not student:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Bạn không phải là sinh viên"
-        )
-    
-    # 3. Check xem sinh viên đã điểm danh chưa
-    attendance_record = db.query(AttendanceRecord).filter(
-        AttendanceRecord.session_id == session.id,
-        AttendanceRecord.student_id == student.id
-    ).first()
-    
-    my_status = None
-    if attendance_record:
-        from app.schemas.attendance import StudentAttendanceStatus
-        my_status = StudentAttendanceStatus(
-            is_present=attendance_record.status in ["present", "late"],
-            status=attendance_record.status,
-            recorded_at=attendance_record.recorded_at,
-            confidence_score=attendance_record.confidence_score
-        )
-    
-    # 4. Return response
-    return StudentCurrentSessionResponse(
-        has_active_session=True,
-        session=SessionResponse.from_orm(session),
-        my_status=my_status
-    )
-
-
-# ============= Additional Endpoints =============
-
-# ============= Additional Endpoints =============
-
-@router.post("/webhook/ai-recognition", status_code=status.HTTP_200_OK)
-async def ai_recognition_webhook(
-    request: Dict[str, Any],
-    db: Session = Depends(get_db)
-):
-    """
-    Webhook endpoint for AI service to send recognition results.
-    
-    Request body:
-    {
-        "session_id": "string",
-        "class_id": int,
-        "recognized_students": [student_id1, student_id2, ...],
-        "timestamp": "ISO datetime string",
-        "total_faces_detected": int
-    }
-    
-    This endpoint:
-    1. Validates the session exists
-    2. Creates attendance records for recognized students
-    3. Broadcasts updates via WebSocket to connected clients
-    """
-    try:
-        # Extract data from request
-        session_id_str = request.get("session_id")
-        class_id = request.get("class_id")
-        recognized_students = request.get("recognized_students", [])
-        timestamp = request.get("timestamp")
-        
-        # Parse session_id (format: "class_{class_id}_session_{session_id}")
-        # Extract numeric session_id
-        import re
-        match = re.search(r'session_(\d+)', session_id_str)
-        if not match:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Invalid session_id format"
-            )
-        session_id = int(match.group(1))
-        
-        # Verify session exists and is ongoing
-        session = db.query(AttendanceSession).filter(
-            AttendanceSession.id == session_id,
-            AttendanceSession.class_id == class_id,
-            AttendanceSession.status == "ongoing"
-        ).first()
-        
-        if not session:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="Session not found or not active"
-            )
-        
-        # Process each recognized student
-        newly_recorded = []
-        for student_id in recognized_students:
-            # Check if already recorded
-            existing_record = db.query(AttendanceRecord).filter(
-                AttendanceRecord.session_id == session_id,
-                AttendanceRecord.student_id == student_id
-            ).first()
-            
-            if existing_record:
-                continue  # Skip already recorded students
-            
-            # Create new attendance record
-            new_record = AttendanceRecord(
-                session_id=session_id,
-                student_id=student_id,
-                status="present",
-                recorded_at=datetime.utcnow(),
-                confidence_score=0.85  # Default confidence
-            )
-            db.add(new_record)
-            newly_recorded.append(student_id)
-        
-        # Commit all new records
-        if newly_recorded:
-            db.commit()
-            
-            # Broadcast updates via WebSocket
-            for student_id in newly_recorded:
-                # Get student info
-                student = db.query(Student).filter(Student.id == student_id).first()
-                if not student:
-                    continue
-                
-                # Get the attendance record we just created
-                record = db.query(AttendanceRecord).filter(
-                    AttendanceRecord.session_id == session_id,
-                    AttendanceRecord.student_id == student_id
-                ).first()
-                
-                # Broadcast to session (for teacher view)
-                await manager.broadcast_to_session(
-                    session_id,
-                    {
-                        "type": "attendance_update",
-                        "session_id": session_id,
-                        "student": {
-                            "student_id": student.id,
-                            "student_code": student.student_code,
-                            "full_name": f"{student.first_name} {student.last_name}",
-                            "status": record.status,
-                            "confidence_score": record.confidence_score,
-                            "recorded_at": record.recorded_at.isoformat() if record.recorded_at else None
-                        }
-                    }
-                )
-                
-                # ✅ NEW: Broadcast student-specific update
-                # This message will be picked up by the student's WebSocket connection
-                student_message = WSStudentAttendanceUpdate(
-                    type="student_attendance_update",
-                    session_id=session_id,
-                    student_id=student.id,
-                    status=record.status,
-                    recorded_at=record.recorded_at.isoformat() if record.recorded_at else None,
-                    confidence_score=record.confidence_score,
-                    message=f"✅ Bạn đã được điểm danh thành công lúc {record.recorded_at.strftime('%H:%M:%S') if record.recorded_at else 'N/A'}"
-                )
-                
-                await manager.broadcast_to_session(
-                    session_id,
-                    student_message.model_dump()
-                )
-        
-        return {
-            "success": True,
-            "message": f"Processed {len(newly_recorded)} new attendance records",
-            "newly_recorded": newly_recorded
-        }
-        
-    except Exception as e:
-        print(f"Error in AI recognition webhook: {e}")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to process recognition results: {str(e)}"
-        )
-
-
-@router.get("/sessions")
-async def get_sessions(
-    class_id: int = None,
-    status: str = None,
-    skip: int = 0,
-    limit: int = 100,
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user)
-):
-    """
-    Lấy danh sách phiên điểm danh.
-    
-    - Filter theo class_id và status
-    - Hỗ trợ pagination
-    """
-    # TODO: Implement logic lấy danh sách phiên với quyền phù hợp
-    pass
 

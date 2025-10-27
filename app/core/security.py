@@ -49,3 +49,62 @@ def decode_token(token: str) -> Optional[dict]:
         return payload
     except JWTError:
         return None
+
+
+def create_websocket_token(
+    user_id: int,
+    session_id: int,
+    role: str,
+    expires_delta: Optional[timedelta] = None
+) -> str:
+    """
+    Tạo JWT token cho WebSocket authentication với AI-Service.
+    
+    Args:
+        user_id: ID của user (teacher/student)
+        session_id: ID của attendance session trong backend
+        role: Role của user (teacher/student)
+        expires_delta: Thời gian hết hạn (default: 30 phút)
+        
+    Returns:
+        JWT token string
+    """
+    to_encode = {
+        "user_id": user_id,
+        "session_id": session_id,
+        "role": role,
+        "type": "websocket"
+    }
+    
+    if expires_delta:
+        expire = datetime.utcnow() + expires_delta
+    else:
+        expire = datetime.utcnow() + timedelta(
+            minutes=settings.AI_WEBSOCKET_TOKEN_EXPIRE_MINUTES
+        )
+    
+    to_encode.update({"exp": expire})
+    encoded_jwt = jwt.encode(to_encode, settings.SECRET_KEY, algorithm=settings.ALGORITHM)
+    return encoded_jwt
+
+
+def verify_websocket_token(token: str) -> Optional[dict]:
+    """
+    Verify và decode WebSocket token.
+    
+    Args:
+        token: JWT token string
+        
+    Returns:
+        Dict chứa user_id, session_id, role nếu valid, None nếu invalid
+    """
+    try:
+        payload = jwt.decode(token, settings.SECRET_KEY, algorithms=[settings.ALGORITHM])
+        
+        # Verify token type
+        if payload.get("type") != "websocket":
+            return None
+            
+        return payload
+    except JWTError:
+        return None
