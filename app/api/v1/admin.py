@@ -2,14 +2,23 @@
 from fastapi import APIRouter, Depends, Query, status, HTTPException
 from sqlalchemy.orm import Session
 from typing import Optional
+from datetime import datetime
 
 from app.core.database import get_db
 from app.core.dependencies import get_current_user
 from app.models.user import User
 from app.schemas.teacher import TeacherListResponse, TeacherDetailResponse, TeacherUpdateRequest
 from app.schemas.student import StudentListResponse, StudentDetailResponse, StudentUpdateRequest
+from app.schemas.face_registration import (
+    FaceRegistrationListResponse,
+    FaceRegistrationListItem,
+    FaceRegistrationDetailResponse,
+    FaceRegistrationApproveRequest,
+    FaceRegistrationRejectRequest
+)
 from app.services.teacher_service import TeacherService
 from app.services.student_service import StudentService
+from app.services.face_registration_service import FaceRegistrationDBService
 
 
 router = APIRouter(prefix="/admin", tags=["Admin"])
@@ -233,3 +242,210 @@ async def delete_student(
     """
     result = StudentService.delete_student(db=db, student_id=student_id)
     return result
+
+
+# ============================================================================
+# FACE REGISTRATION ENDPOINTS
+# ============================================================================
+
+@router.get(
+    "/face-registrations",
+    response_model=FaceRegistrationListResponse,
+    summary="Get face registration requests",
+    description="Get paginated list of face registration requests. Admin only."
+)
+async def get_face_registrations(
+    status: Optional[str] = Query(None, description="Filter by status (pending_admin_review, approved, rejected)"),
+    search: Optional[str] = Query(None, description="Search by student code or name"),
+    page: int = Query(1, ge=1, description="Page number"),
+    limit: int = Query(10, ge=1, le=100, description="Items per page"),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_admin)
+):
+    """
+    Get list of face registration requests with filters.
+    
+    - **status**: Filter by status (pending_admin_review, approved, rejected, etc.)
+    - **search**: Search by student code or name
+    - **page**: Page number (starts from 1)
+    - **limit**: Number of items per page (max 100)
+    """
+    skip = (page - 1) * limit
+    service = FaceRegistrationDBService(db)
+    result = service.get_registrations_list(
+        status=status,
+        search=search,
+        skip=skip,
+        limit=limit
+    )
+    
+    # Transform to response schema
+    items = []
+    for reg in result["items"]:
+        item = FaceRegistrationListItem(
+            id=reg.id,
+            student_id=reg.student_id,
+            student_code=reg.student.student_code,
+            student_name=reg.student.user.full_name,
+            status=reg.status,
+            total_images_captured=reg.total_images_captured or 0,
+            registration_progress=reg.registration_progress or 0.0,
+            student_reviewed_at=reg.student_reviewed_at,
+            student_accepted=reg.student_accepted,
+            admin_reviewed_at=reg.admin_reviewed_at,
+            reviewed_by=reg.reviewed_by,
+            created_at=reg.created_at,
+            updated_at=reg.updated_at
+        )
+        items.append(item)
+    
+    return FaceRegistrationListResponse(
+        items=items,
+        total=result["total"],
+        page=result["page"],
+        limit=result["limit"],
+        total_pages=result["total_pages"]
+    )
+
+
+@router.get(
+    "/face-registrations/{registration_id}",
+    response_model=FaceRegistrationDetailResponse,
+    summary="Get face registration detail",
+    description="Get detailed information of a specific face registration. Admin only."
+)
+async def get_face_registration(
+    registration_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_admin)
+):
+    """
+    Get face registration details by ID.
+    
+    - **registration_id**: Face registration request ID
+    """
+    service = FaceRegistrationDBService(db)
+    reg = service.get_registration_detail(registration_id)
+    
+    # Get reviewer name if exists
+    reviewer_name = None
+    if reg.reviewed_by:
+        from app.models.user import User
+        reviewer = db.query(User).filter(User.id == reg.reviewed_by).first()
+        if reviewer:
+            reviewer_name = reviewer.full_name
+    
+    # ✅ Generate fresh presigned URLs for images
+    verification_data_with_urls = reg.verification_data
+    if reg.verification_data and "steps" in reg.verification_data:
+        # Extract S3 keys from verification_data
+        s3_keys = [step.get("s3_key") for step in reg.verification_data["steps"] if step.get("s3_key")]
+        
+        if s3_keys:
+            from app.services.s3_service import S3Service
+            import copy
+            s3_service = S3Service()
+            
+            # Generate fresh presigned URLs (valid for 2 hours)
+            presigned_urls = s3_service.batch_generate_presigned_urls(
+                file_keys=s3_keys,
+                expires_in=7200  # 2 hours for admin review
+            )
+            
+            # Deep copy verification_data to avoid modifying DB object
+            verification_data_with_urls = copy.deepcopy(reg.verification_data)
+            for step in verification_data_with_urls["steps"]:
+                s3_key = step.get("s3_key")
+                if s3_key and s3_key in presigned_urls:
+                    step["url"] = presigned_urls[s3_key]  # ✅ Fresh URL added dynamically
+    
+    return FaceRegistrationDetailResponse(
+        id=reg.id,
+        student_id=reg.student_id,
+        student_code=reg.student.student_code,
+        student_name=reg.student.user.full_name,
+        student_email=reg.student.user.email,
+        status=reg.status,
+        total_images_captured=reg.total_images_captured or 0,
+        registration_progress=reg.registration_progress or 0.0,
+        verification_data=verification_data_with_urls,  # ✅ Contains fresh URLs
+        temp_images_data=reg.temp_images_data,
+        student_reviewed_at=reg.student_reviewed_at,
+        student_accepted=reg.student_accepted,
+        admin_reviewed_at=reg.admin_reviewed_at,
+        reviewed_by=reg.reviewed_by,
+        reviewer_name=reviewer_name,
+        rejection_reason=reg.rejection_reason,
+        note=reg.note,
+        created_at=reg.created_at,
+        updated_at=reg.updated_at
+    )
+
+
+@router.post(
+    "/face-registrations/{registration_id}/approve",
+    summary="Approve face registration",
+    description="Approve a face registration request. Admin only."
+)
+async def approve_face_registration(
+    registration_id: int,
+    request: FaceRegistrationApproveRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_admin)
+):
+    """
+    Approve a face registration request.
+    
+    - **registration_id**: Face registration request ID
+    - **note**: Optional admin note
+    """
+    service = FaceRegistrationDBService(db)
+    reg = service.approve_registration(
+        registration_id=registration_id,
+        admin_id=current_user.id,
+        note=request.note
+    )
+    
+    return {
+        "success": True,
+        "message": "Face registration approved successfully",
+        "registration_id": reg.id,
+        "status": reg.status,
+        "reviewed_at": reg.admin_reviewed_at
+    }
+
+
+@router.post(
+    "/face-registrations/{registration_id}/reject",
+    summary="Reject face registration",
+    description="Reject a face registration request. Admin only."
+)
+async def reject_face_registration(
+    registration_id: int,
+    request: FaceRegistrationRejectRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_admin)
+):
+    """
+    Reject a face registration request.
+    
+    - **registration_id**: Face registration request ID
+    - **rejection_reason**: Reason for rejection (required)
+    - **note**: Optional additional admin note
+    """
+    service = FaceRegistrationDBService(db)
+    reg = service.reject_registration(
+        registration_id=registration_id,
+        admin_id=current_user.id,
+        rejection_reason=request.rejection_reason,
+        note=request.note
+    )
+    
+    return {
+        "success": True,
+        "message": "Face registration rejected",
+        "registration_id": reg.id,
+        "status": reg.status,
+        "rejection_reason": reg.rejection_reason,
+        "reviewed_at": reg.admin_reviewed_at
+    }

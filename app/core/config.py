@@ -52,6 +52,14 @@ class Settings(BaseSettings):
     AI_SERVICE_URL: str = "http://localhost:8096"  # URL của AI Service
     BACKEND_BASE_URL: str = "http://localhost:8001"  # URL của Backend (for AI-Service callback)
     
+    # Face Verification Settings
+    FACE_VERIFICATION_FPS: int = 10  # Process 10 frames per second
+    FACE_VERIFICATION_JPEG_QUALITY: int = 80  # JPEG compression quality (70-90)
+    FACE_VERIFICATION_TIMEOUT: int = 300  # 5 minutes timeout per session
+    FACE_VERIFICATION_MIN_FACE_WIDTH: int = 200  # Minimum face width in pixels
+    FACE_VERIFICATION_FRAME_WIDTH: int = 640  # Frame width for processing
+    FACE_VERIFICATION_FRAME_HEIGHT: int = 480  # Frame height for processing
+    
     @property
     def MAX_FILE_SIZE_BYTES(self) -> int:
         return self.MAX_FILE_SIZE_MB * 1024 * 1024
