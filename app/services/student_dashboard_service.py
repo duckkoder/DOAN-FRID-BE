@@ -279,7 +279,7 @@ class StudentDashboardService:
                     subject_rate = 0.0
 
                 subject_attendance_list.append(SubjectAttendanceItemSchema(
-                    subject_name=class_info.class_name, # Assuming class_info.name is the subject name
+                    subject_name=class_info.class_name, 
                     attendance_rate=round(subject_rate, 2),
                     total_sessions=total_sessions_for_subject
                 ))
@@ -305,7 +305,7 @@ class StudentDashboardService:
         ).order_by(AttendanceRecord.recorded_at.desc()).limit(limit).all()
 
         for record in recent_attendance:
-            class_name = record.session.class_rel.name if record.session and record.session.class_rel else "Unknown Class"
+            class_name = record.session.class_rel.class_name if record.session and record.session.class_rel else "Unknown Class"
             description = f"Attended {class_name} class"
             activities.append(RecentActivityItemSchema(
                 description=description,
