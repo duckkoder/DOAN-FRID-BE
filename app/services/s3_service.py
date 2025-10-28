@@ -106,7 +106,17 @@ class S3Service:
             )
     
     def get_presigned_url(self, file_key: str, expires_in: int = 3600) -> str:
-        """Generate presigned URL for private files."""
+        """
+        Generate presigned URL for private files.
+        
+        Args:
+            file_key: S3 key of the file
+            expires_in: URL expiration time in seconds (default: 1 hour)
+                       For admin review: recommend 7200 (2 hours) or more
+        
+        Returns:
+            Presigned URL string
+        """
         try:
             url = self.s3_client.generate_presigned_url(
                 'get_object',
@@ -120,6 +130,31 @@ class S3Service:
                 detail=f"Failed to generate URL: {str(e)}"
             )
     
+    def batch_generate_presigned_urls(
+        self, 
+        file_keys: list[str], 
+        expires_in: int = 7200
+    ) -> dict[str, str]:
+        """
+        Batch generate presigned URLs for multiple files.
+        
+        Args:
+            file_keys: List of S3 keys
+            expires_in: URL expiration time in seconds (default: 2 hours for admin review)
+        
+        Returns:
+            Dict mapping file_key to presigned URL
+        """
+        urls = {}
+        for file_key in file_keys:
+            try:
+                urls[file_key] = self.get_presigned_url(file_key, expires_in)
+            except Exception as e:
+                print(f"Failed to generate URL for {file_key}: {e}")
+                urls[file_key] = None
+        
+        return urls
+    
     def delete_file(self, file_key: str) -> bool:
         """Delete file from S3."""
         try:
@@ -129,6 +164,165 @@ class S3Service:
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                 detail=f"Delete failed: {str(e)}"
+            )
+    
+    def generate_face_image_path(self, student_id: int, step_name: str, step_number: int) -> str:
+        """
+        Generate S3 path for face registration image.
+        
+        Args:
+            student_id: Student ID
+            step_name: Verification step name
+            step_number: Step number (1-14)
+        
+        Returns:
+            S3 key path
+        """
+        timestamp = datetime.utcnow().strftime('%Y%m%d_%H%M%S')
+        filename = f"{step_number:02d}_{step_name}_{timestamp}.jpg"
+        s3_key = f"private/faces/student_{student_id}/{filename}"
+        return s3_key
+    
+    async def upload_face_image(
+        self,
+        image_data: bytes,
+        student_id: int,
+        step_name: str,
+        step_number: int,
+        metadata: dict = None
+    ) -> dict:
+        """
+        Upload face image to S3.
+        
+        Args:
+            image_data: Image bytes (JPEG)
+            student_id: Student ID
+            step_name: Verification step name
+            step_number: Step number
+            metadata: Additional metadata
+        
+        Returns:
+            Dict with file_key and file_size (NO URL - generate on-demand when needed)
+        """
+        s3_key = self.generate_face_image_path(student_id, step_name, step_number)
+        
+        # Prepare metadata
+        s3_metadata = {
+            'student-id': str(student_id),
+            'step-name': step_name,
+            'step-number': str(step_number),
+            'uploaded-at': datetime.utcnow().isoformat()
+        }
+        
+        if metadata:
+            for key, value in metadata.items():
+                s3_metadata[f'custom-{key}'] = str(value)
+        
+        # Upload
+        try:
+            self.s3_client.put_object(
+                Bucket=self.bucket_name,
+                Key=s3_key,
+                Body=image_data,
+                ContentType="image/jpeg",
+                Metadata=s3_metadata
+            )
+            
+            # ✅ DON'T generate URL here - it will be generated on-demand when admin reviews
+            # This prevents URL expiration issues
+            
+            return {
+                "file_key": s3_key,
+                "file_size": len(image_data),
+                "step_name": step_name,
+                "step_number": step_number,
+                "is_public": False
+            }
+            
+        except ClientError as e:
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=f"Face image upload failed: {str(e)}"
+            )
+    
+    async def batch_upload_face_images(
+        self,
+        images_data: list[dict],
+        student_id: int
+    ) -> list[dict]:
+        """
+        Batch upload multiple face images.
+        
+        Args:
+            images_data: List of dicts containing:
+                - image_data: bytes
+                - step_name: str
+                - step_number: int
+                - metadata: dict (optional)
+            student_id: Student ID
+        
+        Returns:
+            List of upload results
+        """
+        results = []
+        
+        for image_info in images_data:
+            try:
+                result = await self.upload_face_image(
+                    image_data=image_info["image_data"],
+                    student_id=student_id,
+                    step_name=image_info["step_name"],
+                    step_number=image_info["step_number"],
+                    metadata=image_info.get("metadata")
+                )
+                results.append({
+                    "success": True,
+                    "step_number": image_info["step_number"],
+                    **result
+                })
+            except Exception as e:
+                results.append({
+                    "success": False,
+                    "step_number": image_info["step_number"],
+                    "error": str(e)
+                })
+        
+        return results
+    
+    def batch_delete_files(self, file_keys: list[str]) -> dict:
+        """
+        Batch delete multiple files from S3.
+        
+        Args:
+            file_keys: List of S3 keys to delete
+        
+        Returns:
+            Dict with deleted count and errors
+        """
+        if not file_keys:
+            return {"deleted": 0, "errors": []}
+        
+        try:
+            # S3 batch delete (max 1000 at a time)
+            objects_to_delete = [{"Key": key} for key in file_keys]
+            
+            response = self.s3_client.delete_objects(
+                Bucket=self.bucket_name,
+                Delete={"Objects": objects_to_delete}
+            )
+            
+            deleted = response.get("Deleted", [])
+            errors = response.get("Errors", [])
+            
+            return {
+                "deleted": len(deleted),
+                "errors": errors
+            }
+            
+        except ClientError as e:
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=f"Batch delete failed: {str(e)}"
             )
 
 

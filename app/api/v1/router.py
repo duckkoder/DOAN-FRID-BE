@@ -3,7 +3,7 @@ from fastapi import APIRouter
 
 from app.api.v1 import leaveRequestAPI, teacherClassAPI
 from app.api.v1 import studentClassAPI
-from app.api.v1 import auth, admin, files, department, specialization, attendance
+from app.api.v1 import auth, admin, files, department, specialization, attendance, face_registration
 from app.api.v1 import studentDashboard
 from app.api.v1 import studentAttendanceAPI
 
@@ -31,6 +31,9 @@ api_router.include_router(specialization.router)
 
 # Include attendance router
 api_router.include_router(attendance.router, tags=["Attendance"])
+
+# Include face registration router
+api_router.include_router(face_registration.router, tags=["Face Registration"])
 
 # TODO: Import and include other routers when created
 # from app.api.v1 import users, classes, attendance

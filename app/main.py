@@ -6,6 +6,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from app.core.config import settings
 from app.api.v1.router import api_router
+from app.api.v1.face_registration_ws import router as face_registration_ws_router
 
 
 # Create FastAPI application instance
@@ -31,6 +32,9 @@ app.add_middleware(
 
 # Include API routers
 app.include_router(api_router, prefix=settings.API_V1_STR)
+
+# Include WebSocket router for face registration
+app.include_router(face_registration_ws_router, prefix=settings.API_V1_STR, tags=["Face Registration WebSocket"])
 
 
 # Root endpoint
@@ -61,6 +65,6 @@ if __name__ == "__main__":
     uvicorn.run(
         "app.main:app",
         host="0.0.0.0",
-        port=8001,
+        port=8000,
         reload=True,  # Enable auto-reload during development
     )
