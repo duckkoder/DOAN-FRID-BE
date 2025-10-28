@@ -12,6 +12,9 @@ class StartSessionRequest(BaseModel):
     session_name: Optional[str] = Field(None, description="Tên phiên (tùy chọn)")
     late_threshold_minutes: int = Field(default=15, description="Số phút được phép trễ")
     location: Optional[str] = Field(None, description="Địa điểm điểm danh")
+    day_of_week: Optional[int] = Field(None, description="Thứ trong tuần (0=Chủ nhật, 1=Thứ 2, ..., 6=Thứ 7)")
+    period_range: Optional[str] = Field(None, description="Khoảng tiết học (VD: '1-3', '6-7')")
+    session_index: Optional[int] = Field(None, description="Chỉ số buổi học trong ngày (0, 1, 2, ...)")
 
 
 class SessionResponse(BaseModel):
@@ -24,10 +27,24 @@ class SessionResponse(BaseModel):
     status: str  # ongoing, finished, scheduled
     late_threshold_minutes: int
     location: Optional[str]
+    day_of_week: Optional[int]
+    period_range: Optional[str]
+    session_index: Optional[int]
+    ai_session_id: Optional[str] = Field(None, description="AI Service session ID")
     created_at: datetime
     
     class Config:
         from_attributes = True
+
+
+class StartSessionWithAIResponse(BaseModel):
+    """Response khi start session với AI-Service."""
+    session_id: int = Field(..., description="Backend session ID")
+    ai_session_id: str = Field(..., description="AI Service session ID")
+    ai_ws_url: str = Field(..., description="WebSocket URL cho AI Service")
+    ai_ws_token: str = Field(..., description="JWT token cho WebSocket authentication")
+    expires_at: datetime = Field(..., description="Thời gian hết hạn của session")
+    status: str = Field(..., description="Status của session")
 
 
 class EndSessionRequest(BaseModel):
@@ -40,9 +57,9 @@ class EndSessionResponse(BaseModel):
     session: SessionResponse
     total_students: int
     present_count: int
-    late_count: int
     absent_count: int
-    attendance_rate: float
+    excused_count: int = Field(default=0, description="Số sinh viên vắng có phép (đã xin nghỉ được duyệt)")
+    attendance_rate: float  # Chỉ tính present / total
 
 
 # ============= Recognition Schemas =============
@@ -69,7 +86,7 @@ class RecognizedStudent(BaseModel):
     student_id: int
     student_code: str
     full_name: str
-    status: str  # present hoặc late
+    status: str  # present (luôn là present khi được nhận diện)
     confidence_score: float
     recorded_at: datetime
 
@@ -123,7 +140,7 @@ class WSStudentStatusUpdate(BaseModel):
     type: str = "student_status_update"
     session_id: int
     student_id: int
-    status: str  # pending_confirmation, present, late, etc.
+    status: str  # present, absent, excused
     confidence_score: Optional[float] = None
     message: str
     recorded_at: datetime
@@ -136,7 +153,7 @@ class WSConfirmationUpdate(BaseModel):
     student_id: int
     student_code: str
     full_name: str
-    status: str  # present, late, rejected
+    status: str  # present, absent, excused
     confirmed_by: Optional[str] = None
     confirmed_at: Optional[datetime] = None
 
@@ -153,7 +170,7 @@ class WSSessionStatus(BaseModel):
 
 class ConfirmAttendanceRequest(BaseModel):
     """Request xác nhận điểm danh."""
-    status: str = Field(default="present", description="present hoặc late")
+    status: str = Field(default="present", description="present (có mặt)")
     notes: Optional[str] = Field(None, description="Ghi chú")
 
 
@@ -219,7 +236,7 @@ class MyAttendanceStatusResponse(BaseModel):
 class StudentAttendanceStatus(BaseModel):
     """Trạng thái điểm danh của sinh viên."""
     is_present: bool
-    status: str  # present, late, absent
+    status: str  # present, absent, excused
     recorded_at: Optional[datetime]
     confidence_score: Optional[float]
 
@@ -256,3 +273,30 @@ class SessionListResponse(BaseModel):
     """Response danh sách phiên."""
     sessions: List[SessionResponse]
     total: int
+
+
+# ============= AI Service Callback Schemas =============
+
+class AIValidatedStudent(BaseModel):
+    """Thông tin sinh viên đã được AI Service validate."""
+    student_code: str = Field(..., description="Mã sinh viên")
+    student_name: str = Field(..., description="Tên sinh viên")
+    track_id: int = Field(..., description="Tracking ID")
+    avg_confidence: float = Field(..., description="Độ tin cậy trung bình")
+    frame_count: int = Field(..., description="Số frame đã xử lý")
+    recognition_count: int = Field(..., description="Số lần nhận diện thành công")
+    validation_passed_at: datetime = Field(..., description="Thời điểm pass validation")
+
+
+class AICallbackPayload(BaseModel):
+    """Payload từ AI Service callback."""
+    session_id: str = Field(..., description="AI session ID")
+    validated_students: List[AIValidatedStudent] = Field(..., description="Danh sách sinh viên đã validate")
+    timestamp: datetime = Field(..., description="Thời gian callback")
+
+
+class AICallbackResponse(BaseModel):
+    """Response cho AI Service callback."""
+    status: str = Field(..., description="Status của callback")
+    processed_students: int = Field(..., description="Số sinh viên đã xử lý")
+    message: str = Field(..., description="Thông báo")
