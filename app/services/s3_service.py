@@ -324,6 +324,44 @@ class S3Service:
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                 detail=f"Batch delete failed: {str(e)}"
             )
+    
+    async def download_file(self, file_key: str) -> bytes:
+        """
+        Download file from S3.
+        
+        Args:
+            file_key: S3 key of the file
+        
+        Returns:
+            File content as bytes
+            
+        Raises:
+            HTTPException: If file not found or download fails
+        """
+        try:
+            response = self.s3_client.get_object(
+                Bucket=self.bucket_name,
+                Key=file_key
+            )
+            
+            # Read the file content
+            file_content = response['Body'].read()
+            
+            return file_content
+            
+        except ClientError as e:
+            error_code = e.response.get('Error', {}).get('Code', '')
+            
+            if error_code == 'NoSuchKey':
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail=f"File not found: {file_key}"
+                )
+            else:
+                raise HTTPException(
+                    status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                    detail=f"Failed to download file: {str(e)}"
+                )
 
 
 # Singleton

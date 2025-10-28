@@ -50,7 +50,10 @@ class Settings(BaseSettings):
     
     # AI Service
     AI_SERVICE_URL: str = "http://localhost:8096"  # URL của AI Service
-    BACKEND_BASE_URL: str = "http://localhost:8001"  # URL của Backend (for AI-Service callback)
+    BACKEND_BASE_URL: str = Field(
+        default="http://localhost:8000",  # Default value nếu không có trong .env
+        description="URL của Backend (for AI-Service callback)"
+    )
     AI_SERVICE_SECRET: str = "shared-secret-key-for-hmac-verification"  # Secret key for HMAC
     AI_WEBSOCKET_TOKEN_EXPIRE_MINUTES: int = 30  # WebSocket token expiry
     
