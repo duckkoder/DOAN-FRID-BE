@@ -1,11 +1,26 @@
 """AI Service HTTP Client for communication with face recognition service."""
 import httpx
 import logging
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Any
 from datetime import datetime, timedelta
 from app.core.config import settings
 
 logger = logging.getLogger(__name__)
+
+
+class FaceImageData:
+    """Face image data for AI service"""
+    def __init__(self, image_base64: str, step_name: str, step_number: int):
+        self.image_base64 = image_base64
+        self.step_name = step_name
+        self.step_number = step_number
+    
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "image_base64": self.image_base64,
+            "step_name": self.step_name,
+            "step_number": self.step_number
+        }
 
 
 class AIServiceClient:
@@ -14,6 +29,7 @@ class AIServiceClient:
     def __init__(self):
         self.base_url = settings.AI_SERVICE_URL
         self.timeout = httpx.Timeout(30.0, connect=10.0)
+        self.embedding_timeout = httpx.Timeout(300.0, connect=10.0)  # 5 minutes for embedding extraction
     
     async def create_session(
         self,
@@ -172,6 +188,107 @@ class AIServiceClient:
                 
         except httpx.HTTPError as e:
             logger.error(f"AI Service health check failed: {str(e)}")
+            raise
+    
+    async def register_face_embeddings(
+        self,
+        student_code: str,
+        student_id: int,
+        face_images: List[FaceImageData],
+        use_augmentation: bool = True,
+        augmentation_count: int = 5
+    ) -> Dict[str, Any]:
+        """
+        Send face images to AI service for embedding extraction
+        
+        Args:
+            student_code: Student code (e.g., 'SV862155')
+            student_id: Student database ID
+            face_images: List of FaceImageData objects (14 images)
+            use_augmentation: Whether to use data augmentation
+            augmentation_count: Number of augmented images per original
+            
+        Returns:
+            Dict containing:
+                - success: bool
+                - student_code: str
+                - embeddings: List[Dict] with step_name, step_number, embedding
+                - total_embeddings_created: int
+                - processing_time_seconds: float
+                
+        Raises:
+            httpx.HTTPError: If request fails
+            Exception: For other errors
+        """
+        url = f"{self.base_url}/api/v1/register-face"
+        
+        payload = {
+            "student_code": student_code,
+            "student_id": student_id,
+            "face_images": [img.to_dict() for img in face_images],
+            "use_augmentation": use_augmentation,
+            "augmentation_count": augmentation_count
+        }
+        
+        logger.info(
+            f"Sending face registration request to AI service",
+            extra={
+                "student_code": student_code,
+                "student_id": student_id,
+                "num_images": len(face_images),
+                "use_augmentation": use_augmentation,
+                "url": url
+            }
+        )
+        
+        try:
+            async with httpx.AsyncClient(timeout=self.embedding_timeout) as client:
+                response = await client.post(url, json=payload)
+                response.raise_for_status()
+                
+                result = response.json()
+                
+                logger.info(
+                    f"Face registration successful",
+                    extra={
+                        "student_code": student_code,
+                        "total_embeddings": result.get("total_embeddings_created", 0),
+                        "processing_time": result.get("processing_time_seconds", 0)
+                    }
+                )
+                
+                return result
+                
+        except httpx.HTTPStatusError as e:
+            logger.error(
+                f"AI service returned error: {e.response.status_code}",
+                extra={
+                    "student_code": student_code,
+                    "status_code": e.response.status_code,
+                    "response": e.response.text
+                }
+            )
+            raise Exception(f"AI service error: {e.response.text}")
+            
+        except httpx.RequestError as e:
+            logger.error(
+                f"Failed to connect to AI service",
+                extra={
+                    "student_code": student_code,
+                    "error": str(e),
+                    "url": url
+                }
+            )
+            raise Exception(f"Cannot connect to AI service: {str(e)}")
+            
+        except Exception as e:
+            logger.error(
+                f"Unexpected error calling AI service",
+                extra={
+                    "student_code": student_code,
+                    "error": str(e)
+                }
+            )
             raise
 
 

@@ -3,6 +3,7 @@ from fastapi import APIRouter, Depends, Query, status, HTTPException
 from sqlalchemy.orm import Session
 from typing import Optional
 from datetime import datetime
+import base64
 
 from app.core.database import get_db
 from app.core.dependencies import get_current_user
@@ -19,6 +20,9 @@ from app.schemas.face_registration import (
 from app.services.teacher_service import TeacherService
 from app.services.student_service import StudentService
 from app.services.face_registration_service import FaceRegistrationDBService
+from app.services.ai_service_client import AIServiceClient, FaceImageData
+from app.services.face_embedding_service import FaceEmbeddingService
+from app.services.s3_service import S3Service
 
 
 router = APIRouter(prefix="/admin", tags=["Admin"])
@@ -385,7 +389,7 @@ async def get_face_registration(
 @router.post(
     "/face-registrations/{registration_id}/approve",
     summary="Approve face registration",
-    description="Approve a face registration request. Admin only."
+    description="Approve a face registration request and process embeddings. Admin only."
 )
 async def approve_face_registration(
     registration_id: int,
@@ -396,23 +400,122 @@ async def approve_face_registration(
     """
     Approve a face registration request.
     
+    This will:
+    1. Download cropped face images from S3
+    2. Send images to AI-service for embedding extraction
+    3. Save embeddings to face_embeddings table
+    4. Update registration status to 'approved'
+    
     - **registration_id**: Face registration request ID
     - **note**: Optional admin note
     """
     service = FaceRegistrationDBService(db)
-    reg = service.approve_registration(
-        registration_id=registration_id,
-        admin_id=current_user.id,
-        note=request.note
-    )
     
-    return {
-        "success": True,
-        "message": "Face registration approved successfully",
-        "registration_id": reg.id,
-        "status": reg.status,
-        "reviewed_at": reg.admin_reviewed_at
-    }
+    # Get registration details
+    reg = service.get_registration_detail(registration_id)
+    
+    if reg.status != "pending_admin_review":
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Cannot approve registration with status '{reg.status}'. Must be 'pending_admin_review'."
+        )
+    
+    # Verify verification_data exists
+    if not reg.verification_data or "steps" not in reg.verification_data:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="No verification data found. Cannot process embeddings."
+        )
+    
+    try:
+        # 1. Download images from S3 and prepare for AI service
+        s3_service = S3Service()
+        face_images = []
+        
+        for step in reg.verification_data["steps"]:
+            s3_key = step.get("s3_key")
+            if not s3_key:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=f"Missing S3 key for step {step.get('step_name')}"
+                )
+            
+            # Download image from S3
+            image_bytes = await s3_service.download_file(s3_key)
+            
+            # Convert to base64
+            image_base64 = base64.b64encode(image_bytes).decode('utf-8')
+            
+            # Create FaceImageData
+            face_images.append(FaceImageData(
+                image_base64=image_base64,
+                step_name=step.get("step_name"),
+                step_number=step.get("step_number")
+            ))
+        
+        # 2. Call AI service to extract embeddings
+        ai_client = AIServiceClient()
+        embedding_result = await ai_client.register_face_embeddings(
+            student_code=reg.student.student_code,
+            student_id=reg.student_id,
+            face_images=face_images,
+            use_augmentation=True,  # Enable augmentation for better robustness
+            augmentation_count=5  # 5 augmented versions per image
+        )
+        
+        if not embedding_result.get("success"):
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="AI service failed to extract embeddings"
+            )
+        
+        # 3. Save embeddings to database
+        embeddings_data = embedding_result.get("embeddings", [])
+        
+        face_embeddings = FaceEmbeddingService.create_embeddings_batch(
+            db=db,
+            student_id=reg.student_id,
+            student_code=reg.student.student_code,
+            embeddings_data=embeddings_data,
+            image_prefix="face_registration"
+        )
+        
+        # 4. Update registration status to approved
+        reg = service.approve_registration(
+            registration_id=registration_id,
+            admin_id=current_user.id,
+            note=request.note
+        )
+        
+        return {
+            "success": True,
+            "message": "Face registration approved and embeddings created successfully",
+            "registration_id": reg.id,
+            "status": reg.status,
+            "reviewed_at": reg.admin_reviewed_at,
+            "embeddings_created": len(face_embeddings),
+            "processing_time_seconds": embedding_result.get("processing_time_seconds", 0)
+        }
+        
+    except HTTPException:
+        # Re-raise HTTP exceptions
+        raise
+    except Exception as e:
+        # Log and return error
+        import logging
+        logger = logging.getLogger(__name__)
+        logger.error(
+            f"Failed to process face registration approval: {str(e)}",
+            extra={
+                "registration_id": registration_id,
+                "student_id": reg.student_id,
+                "error": str(e)
+            }
+        )
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to process approval: {str(e)}"
+        )
 
 
 @router.post(
