@@ -17,7 +17,6 @@ class User(BaseModel):
     avatar_url = Column(String(255), nullable=True)
     phone = Column(String(50), nullable=True)
     last_login = Column(DateTime, nullable=True)
-    is_verified = Column(Boolean, default=False)
     
     # Relationships
     admin = relationship("Admin", back_populates="user", uselist=False, cascade="all, delete-orphan")

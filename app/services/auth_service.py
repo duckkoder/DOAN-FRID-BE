@@ -276,6 +276,13 @@ class AuthService:
     def _build_user_response(db: Session, user) -> dict:
         """Build user response with role-specific data."""
         
+        # ✅ Get is_verified from student table (only students have verification)
+        is_verified = False
+        if user.role == "student":
+            student = db.query(Student).filter(Student.user_id == user.id).first()
+            if student:
+                is_verified = student.is_verified
+        
         user_data = {
             "id": user.id,
             "full_name": user.full_name,
@@ -284,7 +291,7 @@ class AuthService:
             "is_active": user.is_active,
             "avatar_url": user.avatar_url,
             "phone": user.phone,
-            "is_verified": user.is_verified,
+            "is_verified": is_verified,  # ✅ From student.is_verified, not user.is_verified
             "created_at": user.created_at,
         }
         

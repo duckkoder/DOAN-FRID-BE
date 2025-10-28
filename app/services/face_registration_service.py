@@ -661,6 +661,12 @@ class FaceRegistrationDBService:
         if note:
             registration.note = (registration.note or "") + f"\nAdmin note: {note}"
         
+        # ✅ Update student.is_verified = True
+        student = registration.student
+        if student and not student.is_verified:
+            student.is_verified = True
+            logger.info(f"Student {student.id} ({student.student_code}) marked as verified")
+        
         self.db.commit()
         self.db.refresh(registration)
         
