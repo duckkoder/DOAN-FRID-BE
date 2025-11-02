@@ -22,7 +22,7 @@ def validate_password_strength(password: str) -> tuple[bool, Optional[str]]:
     Validate password strength.
     
     Requirements:
-    - At least 8 characters long
+    - At least 9 characters long
     - At least one uppercase letter
     - At least one lowercase letter
     - At least one digit
@@ -33,8 +33,8 @@ def validate_password_strength(password: str) -> tuple[bool, Optional[str]]:
     Returns:
         Tuple of (is_valid, error_message)
     """
-    if len(password) < 8:
-        return False, "Mật khẩu phải có ít nhất 8 ký tự"
+    if len(password) < 9:
+        return False, "Mật khẩu phải có ít nhất 9 ký tự"
     
     if not re.search(r'[A-Z]', password):
         return False, "Mật khẩu phải chứa ít nhất 1 chữ hoa"

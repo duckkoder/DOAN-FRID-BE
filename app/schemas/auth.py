@@ -7,7 +7,7 @@ class RegisterRequest(BaseModel):
     """Request body for user registration."""
     full_name: str = Field(..., min_length=2, max_length=255, description="Full name of user")
     email: EmailStr = Field(..., description="Valid email address")
-    password: str = Field(..., min_length=8, max_length=100, description="Password (min 8 characters, must contain 1 uppercase, 1 lowercase, 1 digit)")
+    password: str = Field(..., min_length=9, max_length=100, description="Password (min 9 characters, must contain 1 uppercase, 1 lowercase, 1 digit)")
     role: str = Field(..., description="User role: 'teacher' or 'student'")
     phone: Optional[str] = Field(None, max_length=50, description="Phone number (optional)")
     avatar_url: Optional[str] = Field(None, description="Avatar URL (S3)")
