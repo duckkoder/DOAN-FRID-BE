@@ -8,8 +8,8 @@ import base64
 from app.core.database import get_db
 from app.core.dependencies import get_current_user
 from app.models.user import User
-from app.schemas.teacher import TeacherListResponse, TeacherDetailResponse, TeacherUpdateRequest
-from app.schemas.student import StudentListResponse, StudentDetailResponse, StudentUpdateRequest
+from app.schemas.teacher import TeacherListResponse, TeacherDetailResponse, TeacherUpdateRequest, ResetPasswordRequest as TeacherResetPasswordRequest, ResetPasswordResponse as TeacherResetPasswordResponse
+from app.schemas.student import StudentListResponse, StudentDetailResponse, StudentUpdateRequest, ResetPasswordRequest as StudentResetPasswordRequest, ResetPasswordResponse as StudentResetPasswordResponse
 from app.schemas.face_registration import (
     FaceRegistrationListResponse,
     FaceRegistrationListItem,
@@ -552,3 +552,59 @@ async def reject_face_registration(
         "rejection_reason": reg.rejection_reason,
         "reviewed_at": reg.admin_reviewed_at
     }
+
+
+# ============================================================================
+# PASSWORD RESET ENDPOINTS
+# ============================================================================
+
+@router.post(
+    "/teachers/{teacher_id}/reset-password",
+    response_model=TeacherResetPasswordResponse,
+    summary="Reset teacher password",
+    description="Reset password for a specific teacher. Admin only."
+)
+async def reset_teacher_password(
+    teacher_id: int,
+    request: TeacherResetPasswordRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_admin)
+):
+    """
+    Reset teacher password.
+    
+    - **teacher_id**: Teacher ID
+    - **new_password**: New password (min 8 characters, must contain uppercase, lowercase, and digit)
+    """
+    result = TeacherService.reset_password(
+        db=db,
+        teacher_id=teacher_id,
+        new_password=request.new_password
+    )
+    return result
+
+
+@router.post(
+    "/students/{student_id}/reset-password",
+    response_model=StudentResetPasswordResponse,
+    summary="Reset student password",
+    description="Reset password for a specific student. Admin only."
+)
+async def reset_student_password(
+    student_id: int,
+    request: StudentResetPasswordRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_admin)
+):
+    """
+    Reset student password.
+    
+    - **student_id**: Student ID
+    - **new_password**: New password (min 8 characters, must contain uppercase, lowercase, and digit)
+    """
+    result = StudentService.reset_password(
+        db=db,
+        student_id=student_id,
+        new_password=request.new_password
+    )
+    return result
