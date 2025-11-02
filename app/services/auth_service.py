@@ -93,7 +93,6 @@ class AuthService:
             phone=request.phone,
             avatar_url=request.avatar_url,
             is_active=True,
-            is_verified=False,
         )
         db.add(new_user)
         db.flush()
