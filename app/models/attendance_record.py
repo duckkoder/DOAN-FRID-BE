@@ -2,6 +2,7 @@
 from sqlalchemy import Column, Integer, String, Float, DateTime, ForeignKey, UniqueConstraint, Index
 from sqlalchemy.orm import relationship
 from datetime import datetime
+from zoneinfo import ZoneInfo
 from app.models.base import BaseModel
 
 
@@ -15,7 +16,7 @@ class AttendanceRecord(BaseModel):
     status = Column(String(50), nullable=False, default="absent")  # present, absent, late, excused
     image_path = Column(String(255), nullable=True)
     confidence_score = Column(Float, nullable=True)
-    recorded_at = Column(DateTime, default=datetime.utcnow)
+    recorded_at = Column(DateTime(timezone=True), default=lambda: datetime.now(ZoneInfo('Asia/Ho_Chi_Minh')))  # ✅ Vietnam timezone
     notes = Column(String(255), nullable=True)
     
     # Relationships

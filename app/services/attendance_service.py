@@ -1,9 +1,13 @@
 """Attendance service với AI-Service integration."""
 import logging
 from typing import List, Optional
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
+from zoneinfo import ZoneInfo
 from sqlalchemy.orm import Session
 from fastapi import HTTPException, status
+
+# ✅ Define Vietnam timezone for consistency
+VIETNAM_TZ = ZoneInfo('Asia/Ho_Chi_Minh')
 
 from app.models.user import User
 from app.models.class_model import Class
@@ -125,10 +129,14 @@ class AttendanceService:
             )
         
         # 6. Tạo session trong DB với status="scheduled"
+        # ✅ Use Vietnam timezone for all datetime fields
+        vietnam_now = datetime.now(VIETNAM_TZ)
+        default_session_name = f"Điểm danh {vietnam_now.strftime('%d/%m/%Y %H:%M')}"
+        
         new_session = AttendanceSession(
             class_id=request.class_id,
-            session_name=request.session_name or f"Điểm danh {datetime.now().strftime('%d/%m/%Y %H:%M')}",
-            start_time=datetime.utcnow(),
+            session_name=request.session_name or default_session_name,
+            start_time=vietnam_now,
             status=SessionStatus.SCHEDULED.value,  # Scheduled cho đến khi AI-Service confirm
             late_threshold_minutes=request.late_threshold_minutes,
             location=request.location,
@@ -211,7 +219,7 @@ class AttendanceService:
         ai_ws_base = settings.AI_SERVICE_URL.replace("http://", "ws://").replace("https://", "wss://")
         ai_ws_url = f"{ai_ws_base}/api/v1/sessions/{ai_session_id}/stream"
         
-        expires_at = datetime.utcnow() + token_expires
+        expires_at = datetime.now(VIETNAM_TZ) + token_expires
         
         return StartSessionWithAIResponse(
             session_id=new_session.id,
@@ -440,7 +448,7 @@ class AttendanceService:
                     session_id=session_id,
                     student_id=student_id,
                     status=AttendanceStatus.ABSENT,
-                    recorded_at=datetime.utcnow()
+                    recorded_at=datetime.now(VIETNAM_TZ)
                 )
                 self.db.add(new_record)
         
@@ -489,7 +497,7 @@ class AttendanceService:
         
         # Cập nhật trạng thái phiên
         session.status = SessionStatus.FINISHED.value
-        session.end_time = datetime.utcnow()
+        session.end_time = datetime.now(VIETNAM_TZ)
         self.db.commit()
         self.db.refresh(session)
         
