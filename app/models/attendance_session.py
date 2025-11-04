@@ -11,8 +11,8 @@ class AttendanceSession(BaseModel):
     
     class_id = Column(Integer, ForeignKey("classes.id", ondelete="CASCADE"), nullable=False)
     session_name = Column(String(255), nullable=True)
-    start_time = Column(DateTime, nullable=False)
-    end_time = Column(DateTime, nullable=True)
+    start_time = Column(DateTime(timezone=True), nullable=False)  # ✅ Enable timezone support
+    end_time = Column(DateTime(timezone=True), nullable=True)  # ✅ Enable timezone support
     status = Column(String(50), nullable=False, default="scheduled")  # scheduled, ongoing, finished
     qr_code = Column(Text, nullable=True)
     allow_late_checkin = Column(Boolean, default=True)
