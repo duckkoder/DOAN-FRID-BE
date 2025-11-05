@@ -48,7 +48,7 @@ class StudentUpdateRequest(BaseModel):
 
 class ResetPasswordRequest(BaseModel):
     """Request to reset user password."""
-    new_password: str = Field(..., min_length=9, max_length=100, description="New password (min 9 characters)")
+    new_password: str = Field(..., min_length=8, max_length=100, description="New password (min 8 characters)")
     
     @field_validator('new_password')
     @classmethod
