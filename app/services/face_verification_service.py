@@ -30,8 +30,8 @@ class FaceVerificationService:
         self.verification_steps = [
             {
                 "name": "face_front",
-                "instruction": "Look straight at the camera for 2 seconds",
-                "duration": 2.0,
+                "instruction": "Look straight at the camera for 1 second",
+                "duration": 1.0,
                 "condition": self.check_front_face,
                 "tolerance": 10
             },
@@ -39,7 +39,7 @@ class FaceVerificationService:
             {
                 "name": "face_left_5",
                 "instruction": "Turn your face slightly to the left (5°)",
-                "duration": 1.5,
+                "duration": 1.0,
                 "condition": self.check_left_face,
                 "target_angle": 5,
                 "tolerance": 4
@@ -47,7 +47,7 @@ class FaceVerificationService:
             {
                 "name": "face_left_10",
                 "instruction": "Turn your face to the left (10°)",
-                "duration": 1.5,
+                "duration": 1.0,
                 "condition": self.check_left_face,
                 "target_angle": 10,
                 "tolerance": 4
@@ -55,7 +55,7 @@ class FaceVerificationService:
             {
                 "name": "face_left_15",
                 "instruction": "Turn your face more to the left (15°)",
-                "duration": 1.5,
+                "duration": 1.0,
                 "condition": self.check_left_face,
                 "target_angle": 15,
                 "tolerance": 4
@@ -63,7 +63,7 @@ class FaceVerificationService:
             {
                 "name": "face_left_20",
                 "instruction": "Turn your face further to the left (20°)",
-                "duration": 1.5,
+                "duration": 1.0,
                 "condition": self.check_left_face,
                 "target_angle": 20,
                 "tolerance": 4
@@ -72,7 +72,7 @@ class FaceVerificationService:
             {
                 "name": "face_right_5",
                 "instruction": "Turn your face slightly to the right (5°)",
-                "duration": 1.5,
+                "duration": 1.0,
                 "condition": self.check_right_face,
                 "target_angle": 5,
                 "tolerance": 4
@@ -80,7 +80,7 @@ class FaceVerificationService:
             {
                 "name": "face_right_10",
                 "instruction": "Turn your face to the right (10°)",
-                "duration": 1.5,
+                "duration": 1.0,
                 "condition": self.check_right_face,
                 "target_angle": 10,
                 "tolerance": 4
@@ -88,7 +88,7 @@ class FaceVerificationService:
             {
                 "name": "face_right_15",
                 "instruction": "Turn your face more to the right (15°)",
-                "duration": 1.5,
+                "duration": 1.0,
                 "condition": self.check_right_face,
                 "target_angle": 15,
                 "tolerance": 4
@@ -96,7 +96,7 @@ class FaceVerificationService:
             {
                 "name": "face_right_20",
                 "instruction": "Turn your face further to the right (20°)",
-                "duration": 1.5,
+                "duration": 1.0,
                 "condition": self.check_right_face,
                 "target_angle": 20,
                 "tolerance": 4
@@ -105,41 +105,41 @@ class FaceVerificationService:
             {
                 "name": "face_close",
                 "instruction": "Move your face closer to the camera",
-                "duration": 2.0,
+                "duration": 1.0,
                 "condition": self.check_face_close,
                 "tolerance": 5
             },
-            # Face up/down
+            # Face up/down - reduced to 5° and 10°
+            {
+                "name": "face_up_5",
+                "instruction": "Tilt your face up (5°)",
+                "duration": 1.0,
+                "condition": self.check_up_face,
+                "target_angle": -5,
+                "tolerance": 4
+            },
             {
                 "name": "face_up_10",
-                "instruction": "Tilt your face up (10°)",
-                "duration": 1.5,
+                "instruction": "Tilt your face up more (10°)",
+                "duration": 1.0,
                 "condition": self.check_up_face,
                 "target_angle": -10,
                 "tolerance": 4
             },
             {
-                "name": "face_up_15",
-                "instruction": "Tilt your face up more (15°)",
-                "duration": 1.5,
-                "condition": self.check_up_face,
-                "target_angle": -15,
+                "name": "face_down_5",
+                "instruction": "Tilt your face down (5°)",
+                "duration": 1.0,
+                "condition": self.check_down_face,
+                "target_angle": 5,
                 "tolerance": 4
             },
             {
                 "name": "face_down_10",
-                "instruction": "Tilt your face down (10°)",
-                "duration": 1.5,
+                "instruction": "Tilt your face down more (10°)",
+                "duration": 1.0,
                 "condition": self.check_down_face,
                 "target_angle": 10,
-                "tolerance": 4
-            },
-            {
-                "name": "face_down_15",
-                "instruction": "Tilt your face down more (15°)",
-                "duration": 1.5,
-                "condition": self.check_down_face,
-                "target_angle": 15,
                 "tolerance": 4
             },
         ]

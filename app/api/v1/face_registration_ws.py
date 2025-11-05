@@ -368,11 +368,18 @@ class FaceRegistrationWebSocketHandler:
                 # Student accepted - upload to S3 and create file records
                 logger.info(f"Student {self.student_id} accepted images, uploading to S3...")
                 
+                # Get captured images from temp_images_data dict
                 temp_images_data = self.registration_request.temp_images_data
+                if isinstance(temp_images_data, dict):
+                    captured_images = temp_images_data.get("captured_images", [])
+                else:
+                    # Fallback for old format (direct list)
+                    captured_images = temp_images_data if isinstance(temp_images_data, list) else []
+                
                 file_metadata_list = []
                 
                 # Upload each image to S3
-                for temp_data in temp_images_data:
+                for temp_data in captured_images:
                     # Decode base64 back to bytes
                     import base64
                     image_bytes = base64.b64decode(temp_data["image_base64"])
@@ -438,12 +445,22 @@ class FaceRegistrationWebSocketHandler:
                     f"uploaded {len(file_metadata_list)} files, status=pending_admin_review"
                 )
             else:
-                # Student rejected - allow re-collection
+                # Student rejected - update database and allow re-collection
+                self.registration_request.status = None  # Allow new registration
+                self.registration_request.temp_images_data = None  # Clear temp data
+                self.registration_request.total_images_captured = 0
+                self.registration_request.registration_progress = 0.0
+                
+                from sqlalchemy.orm import Session
+                db: Session = self.db_service.db
+                db.commit()
+                db.refresh(self.registration_request)
+                
                 response = WSStudentConfirmedResponse(
                     accepted=False,
                     message="Images rejected. You can collect new images now.",
                     registration_id=self.registration_request.id,
-                    status="rejected"
+                    status=None  # Changed from "rejected" to None
                 )
                 
                 await self.websocket.send_json(response.model_dump(mode='json'))
@@ -453,7 +470,8 @@ class FaceRegistrationWebSocketHandler:
                 self.captured_images.clear()
                 
                 logger.info(
-                    f"Student {self.student_id} rejected images for registration {self.registration_request.id}"
+                    f"Student {self.student_id} rejected images for registration {self.registration_request.id}, "
+                    "reset status to None for re-collection"
                 )
         
         except Exception as e:

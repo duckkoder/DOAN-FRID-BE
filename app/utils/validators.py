@@ -22,7 +22,7 @@ def validate_password_strength(password: str) -> tuple[bool, Optional[str]]:
     Validate password strength.
     
     Requirements:
-    - At least 9 characters long
+    - At least 8 characters long
     - At least one uppercase letter
     - At least one lowercase letter
     - At least one digit
@@ -33,8 +33,8 @@ def validate_password_strength(password: str) -> tuple[bool, Optional[str]]:
     Returns:
         Tuple of (is_valid, error_message)
     """
-    if len(password) < 9:
-        return False, "Mật khẩu phải có ít nhất 9 ký tự"
+    if len(password) < 8:
+        return False, "Mật khẩu phải có ít nhất 8 ký tự"
     
     if not re.search(r'[A-Z]', password):
         return False, "Mật khẩu phải chứa ít nhất 1 chữ hoa"
@@ -76,3 +76,60 @@ def validate_student_code(code: str) -> bool:
     # Example: Student code should be alphanumeric, 6-20 characters
     pattern = r'^[A-Za-z0-9]{6,20}$'
     return re.match(pattern, code) is not None
+
+
+def validate_student_email(email: str) -> tuple[bool, Optional[str]]:
+    """
+    Validate student email format.
+    
+    Requirements:
+    - Must end with @sv1.dut.udn.vn
+    - Part before @ must be exactly 9 digits
+    - Example: 102220347@sv1.dut.udn.vn
+    
+    Args:
+        email: Email string to validate
+        
+    Returns:
+        Tuple of (is_valid, error_message)
+    """
+    pattern = r'^[0-9]{9}@sv1\.dut\.udn\.vn$'
+    if not re.match(pattern, email):
+        return False, "Email sinh viên phải có dạng: 9 chữ số + @sv1.dut.udn.vn (VD: 102220347@sv1.dut.udn.vn)"
+    return True, None
+
+
+def validate_teacher_email(email: str) -> tuple[bool, Optional[str]]:
+    """
+    Validate teacher email format.
+    
+    Requirements:
+    - Must end with @dut.udn.vn
+    - Part before @ can be any valid email format
+    
+    Args:
+        email: Email string to validate
+        
+    Returns:
+        Tuple of (is_valid, error_message)
+    """
+    pattern = r'^[a-zA-Z0-9._%+-]+@dut\.udn\.vn$'
+    if not re.match(pattern, email):
+        return False, "Email giáo viên phải có dạng: tên + @dut.udn.vn"
+    return True, None
+
+
+def extract_student_code_from_email(email: str) -> Optional[str]:
+    """
+    Extract student code (9 digits) from student email.
+    
+    Args:
+        email: Student email (format: 102220347@sv1.dut.udn.vn)
+        
+    Returns:
+        Student code (9 digits) or None if invalid
+    """
+    match = re.match(r'^([0-9]{9})@sv1\.dut\.udn\.vn$', email)
+    if match:
+        return match.group(1)
+    return None
