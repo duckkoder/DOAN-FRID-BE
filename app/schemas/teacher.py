@@ -1,5 +1,5 @@
 """Teacher schemas for API requests and responses."""
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 from typing import Optional
 from datetime import datetime
 
@@ -40,6 +40,29 @@ class TeacherUpdateRequest(BaseModel):
     phone: Optional[str] = Field(None, max_length=50, description="Phone number")
     avatar_url: Optional[str] = Field(None, description="Avatar URL (S3)")
     is_active: Optional[bool] = Field(None, description="Active status")
+
+
+class ResetPasswordRequest(BaseModel):
+    """Request to reset user password."""
+    new_password: str = Field(..., min_length=9, max_length=100, description="New password (min 9 characters)")
+    
+    @field_validator('new_password')
+    @classmethod
+    def validate_password(cls, v):
+        """Validate password strength."""
+        from app.utils.validators import validate_password_strength
+        is_valid, error_message = validate_password_strength(v)
+        if not is_valid:
+            raise ValueError(error_message)
+        return v
+
+
+class ResetPasswordResponse(BaseModel):
+    """Response after password reset."""
+    success: bool
+    message: str
+    user_id: int
+    email: str
 
 
 class TeacherListResponse(BaseModel):

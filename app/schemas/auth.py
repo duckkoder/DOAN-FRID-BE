@@ -7,7 +7,7 @@ class RegisterRequest(BaseModel):
     """Request body for user registration."""
     full_name: str = Field(..., min_length=2, max_length=255, description="Full name of user")
     email: EmailStr = Field(..., description="Valid email address")
-    password: str = Field(..., min_length=6, max_length=100, description="Password (min 6 characters)")
+    password: str = Field(..., min_length=9, max_length=100, description="Password (min 9 characters, must contain 1 uppercase, 1 lowercase, 1 digit)")
     role: str = Field(..., description="User role: 'teacher' or 'student'")
     phone: Optional[str] = Field(None, max_length=50, description="Phone number (optional)")
     avatar_url: Optional[str] = Field(None, description="Avatar URL (S3)")
@@ -21,6 +21,37 @@ class RegisterRequest(BaseModel):
     student_code: Optional[str] = Field(None, max_length=50, description="Student code (required if role=student)")
     academic_year: Optional[int] = Field(None, ge=2000, le=2100, description="Academic year (optional for student)")
     date_of_birth: Optional[date] = Field(None, description="Date of birth (optional for student)")
+    
+    @field_validator('password')
+    @classmethod
+    def validate_password(cls, v):
+        """Validate password strength."""
+        from app.utils.validators import validate_password_strength
+        is_valid, error_message = validate_password_strength(v)
+        if not is_valid:
+            raise ValueError(error_message)
+        return v
+    
+    @field_validator('email')
+    @classmethod
+    def validate_email_format(cls, v, info):
+        """Validate email format based on role."""
+        from app.utils.validators import validate_student_email, validate_teacher_email
+        
+        # Get role from context (if available during validation)
+        role = info.data.get('role')
+        
+        if role == 'student':
+            is_valid, error_message = validate_student_email(v)
+            if not is_valid:
+                raise ValueError(error_message)
+        elif role == 'teacher':
+            is_valid, error_message = validate_teacher_email(v)
+            if not is_valid:
+                raise ValueError(error_message)
+        
+        return v
+    
     @field_validator('role')
     @classmethod
     def validate_role(cls, v):
@@ -30,11 +61,18 @@ class RegisterRequest(BaseModel):
     
     @model_validator(mode='after')
     def validate_role_specific_fields(self):
-        """Validate role-specific required fields."""
+        """Validate role-specific required fields and extract student_code from email."""
+        from app.utils.validators import extract_student_code_from_email
+        
         if self.role == 'teacher' and not self.teacher_code:
             raise ValueError('teacher_code is required for teacher role')
-        if self.role == 'student' and not self.student_code:
-            raise ValueError('student_code is required for student role')
+        if self.role == 'student':
+            # Auto-extract student_code from email
+            student_code_from_email = extract_student_code_from_email(self.email)
+            if student_code_from_email:
+                self.student_code = student_code_from_email
+            elif not self.student_code:
+                raise ValueError('student_code is required for student role')
         return self
 
     model_config = {
@@ -43,7 +81,7 @@ class RegisterRequest(BaseModel):
                 {
                     "full_name": "Nguyen Van A",
                     "email": "student@example.com",
-                    "password": "password123",
+                    "password": "Password123",
                     "role": "student",
                     "phone": "0123456789",
                     "student_code": "SV001",
@@ -53,7 +91,7 @@ class RegisterRequest(BaseModel):
                 {
                     "full_name": "Teacher Name",
                     "email": "teacher@example.com",
-                    "password": "password123",
+                    "password": "Teacher123",
                     "role": "teacher",
                     "phone": "0987654321",
                     "teacher_code": "GV001",
@@ -113,7 +151,7 @@ class LoginRequest(BaseModel):
             "examples": [
                 {
                     "email": "student@example.com",
-                    "password": "password123"
+                    "password": "Password123"
                 }
             ]
         }

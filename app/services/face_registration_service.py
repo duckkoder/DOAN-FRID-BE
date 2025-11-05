@@ -175,8 +175,12 @@ class FaceRegistrationDBService:
                 detail=f"Registration request {registration_id} not found"
             )
         
-        # Save temp data
-        registration.temp_images_data = images_data
+        # Save temp data as dict with "captured_images" key
+        registration.temp_images_data = {
+            "captured_images": images_data,
+            "total_images": len(images_data),
+            "captured_at": datetime.utcnow().isoformat()
+        }
         registration.status = "pending_student_review"
         registration.total_images_captured = len(images_data)
         registration.registration_progress = 100.0

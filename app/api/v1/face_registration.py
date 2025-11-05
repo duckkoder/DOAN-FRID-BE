@@ -66,10 +66,12 @@ async def get_registration_status(
         }
     
     # Determine if student can register based on status
-    can_register = registration.status in ["rejected", "cancelled", "collecting"]
+    # None means no active registration (can register)
+    can_register = registration.status in [None, "rejected", "cancelled", "collecting"]
     
     # Build response based on status
     status_messages = {
+        None: "Chưa có đăng ký nào đang hoạt động, bạn có thể đăng ký mới",
         "collecting": "Đang trong quá trình thu thập dữ liệu",
         "pending_student_review": "Đã thu thập xong, đang chờ bạn xác nhận",
         "pending_admin_review": "Đã gửi yêu cầu, đang chờ admin phê duyệt",
@@ -127,3 +129,224 @@ async def get_my_registration_status(
         db=db,
         current_user=current_user
     )
+
+
+@router.get(
+    "/load-pending-review",
+    summary="Load pending review images",
+    description="Load temporary images for pending student review"
+)
+async def load_pending_review_images(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """
+    Load temporary images when student needs to review.
+    Only works for pending_student_review status.
+    """
+    # Check if user is a student
+    if current_user.role != "student" or not current_user.student:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Current user is not a student"
+        )
+    
+    student_id = current_user.student.id
+    
+    # Get most recent registration with pending_student_review status
+    from app.models.face_registration_request import FaceRegistrationRequest
+    registration = (
+        db.query(FaceRegistrationRequest)
+        .filter(
+            FaceRegistrationRequest.student_id == student_id,
+            FaceRegistrationRequest.status == "pending_student_review"
+        )
+        .order_by(FaceRegistrationRequest.created_at.desc())
+        .first()
+    )
+    
+    if not registration:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="No pending review found"
+        )
+    
+    # Load temp data from JSON field
+    if not registration.temp_images_data or not isinstance(registration.temp_images_data, dict):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="No temporary data available"
+        )
+    
+    captured_images = registration.temp_images_data.get("captured_images", [])
+    
+    if not captured_images:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="No images found in temporary data"
+        )
+    
+    return {
+        "registration_id": registration.id,
+        "status": registration.status,
+        "total_images": len(captured_images),
+        "preview_images": captured_images,
+        "message": "Loaded temporary images for review"
+    }
+
+
+@router.post(
+    "/confirm-pending-review",
+    summary="Confirm pending review images",
+    description="Student confirms or rejects temporarily stored images"
+)
+async def confirm_pending_review(
+    accept: bool,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """
+    Confirm or reject pending review images.
+    If accepted: upload to S3 and change status to pending_admin_review
+    If rejected: delete temp data and change status to can_register
+    """
+    # Check if user is a student
+    if current_user.role != "student" or not current_user.student:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Current user is not a student"
+        )
+    
+    student_id = current_user.student.id
+    
+    # Get most recent registration with pending_student_review status
+    from app.models.face_registration_request import FaceRegistrationRequest
+    from app.core.logging import logger
+    
+    registration = (
+        db.query(FaceRegistrationRequest)
+        .filter(
+            FaceRegistrationRequest.student_id == student_id,
+            FaceRegistrationRequest.status == "pending_student_review"
+        )
+        .order_by(FaceRegistrationRequest.created_at.desc())
+        .first()
+    )
+    
+    logger.info(f"Student {student_id} confirm (accept={accept}) - found registration: {registration is not None}")
+    if registration:
+        logger.info(f"Registration ID: {registration.id}, status: {registration.status}")
+        logger.info(f"temp_images_data type: {type(registration.temp_images_data)}")
+        if isinstance(registration.temp_images_data, dict):
+            logger.info(f"temp_images_data keys: {registration.temp_images_data.keys()}")
+    
+    if not registration:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="No pending review found"
+        )
+    
+    if accept:
+        # Student accepted - upload to S3 and move to pending_admin_review
+        from datetime import datetime
+        from app.services.s3_service import S3Service
+        from app.schemas.face_registration import FaceImageMetadata, PoseAngles, CropInfo, FaceRegistrationVerificationData
+        import base64
+        
+        db_service = FaceRegistrationDBService(db)
+        s3_service = S3Service()
+        
+        # Extract images from temp data
+        temp_images_data = registration.temp_images_data
+        if isinstance(temp_images_data, dict):
+            captured_images = temp_images_data.get("captured_images", [])
+        else:
+            captured_images = temp_images_data
+        
+        if not captured_images:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="No images found in temporary data"
+            )
+        
+        # Upload images to S3 and create file records
+        try:
+            file_metadata_list = []
+            
+            for temp_data in captured_images:
+                # Decode base64 to bytes
+                image_bytes = base64.b64decode(temp_data["image_base64"])
+                
+                # Upload to S3
+                upload_result = await s3_service.upload_face_image(
+                    image_data=image_bytes,
+                    student_id=student_id,
+                    step_name=temp_data["step_name"],
+                    step_number=temp_data["step_number"],
+                    metadata=temp_data["pose_angles"]
+                )
+                
+                # Create metadata for file record
+                metadata = FaceImageMetadata(
+                    step_name=temp_data["step_name"],
+                    step_number=temp_data["step_number"],
+                    instruction=temp_data["instruction"],
+                    timestamp=datetime.fromisoformat(temp_data["timestamp"]),
+                    pose_angles=PoseAngles(**temp_data["pose_angles"]),
+                    face_width=temp_data["face_width"],
+                    crop_info=CropInfo(**temp_data["crop_info"]),
+                    s3_key=upload_result["file_key"],
+                    file_size=upload_result["file_size"]
+                )
+                file_metadata_list.append(metadata)
+            
+            # Batch create file records
+            file_records = db_service.batch_create_file_records(
+                uploader_id=current_user.student.user_id,
+                file_metadata_list=file_metadata_list,
+                category="face_registration"
+            )
+            
+            # Prepare verification data
+            verification_data = FaceRegistrationVerificationData(
+                verification_date=datetime.utcnow(),
+                total_steps=14,
+                completed_steps=len(file_metadata_list),
+                success=True,
+                steps=file_metadata_list
+            )
+            
+            # Complete registration
+            registration = db_service.complete_registration(
+                registration_id=registration.id,
+                verification_data=verification_data,
+                file_records=file_records
+            )
+            
+            return {
+                "success": True,
+                "status": "pending_admin_review",
+                "message": "Ảnh đã được xác nhận và gửi cho admin duyệt",
+                "total_images": len(file_records)
+            }
+            
+        except Exception as e:
+            db.rollback()
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=f"Failed to upload images: {str(e)}"
+            )
+    else:
+        # Student rejected - clear temp data and reset to can_register
+        registration.temp_images_data = None
+        registration.status = None  # Reset to allow new registration
+        
+        db.commit()
+        
+        return {
+            "success": True,
+            "status": None,
+            "message": "Đã hủy ảnh. Bạn có thể thu thập lại."
+        }
+
+

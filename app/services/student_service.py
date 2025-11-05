@@ -8,6 +8,7 @@ from app.models.student import Student
 from app.models.user import User
 from app.models.department import Department
 from app.schemas.student import StudentUpdateRequest, StudentResponse
+from app.core.security import get_password_hash
 
 
 class StudentService:
@@ -278,3 +279,43 @@ class StudentService:
         db.commit()
         
         return {"message": "Student deactivated successfully"}
+    
+    @staticmethod
+    def reset_password(db: Session, student_id: int, new_password: str) -> dict:
+        """
+        Reset student password.
+        
+        Args:
+            db: Database session
+            student_id: Student ID
+            new_password: New password (plain text, will be hashed)
+            
+        Returns:
+            Success message with user info
+        """
+        student = db.query(Student).filter(Student.id == student_id).first()
+        if not student:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Student not found"
+            )
+        
+        user = db.query(User).filter(User.id == student.user_id).first()
+        if not user:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="User not found"
+            )
+        
+        # Hash new password
+        hashed_password = get_password_hash(new_password)
+        user.password_hash = hashed_password
+        
+        db.commit()
+        
+        return {
+            "success": True,
+            "message": "Password reset successfully",
+            "user_id": user.id,
+            "email": user.email
+        }

@@ -1,15 +1,15 @@
 """Admin API endpoints for managing teachers, students, and system."""
-from fastapi import APIRouter, Depends, Query, status, HTTPException
+from fastapi import APIRouter, Depends, Query, status, HTTPException, UploadFile, File
 from sqlalchemy.orm import Session
-from typing import Optional
+from typing import Optional, List, Dict, Any
 from datetime import datetime
 import base64
 
 from app.core.database import get_db
 from app.core.dependencies import get_current_user
 from app.models.user import User
-from app.schemas.teacher import TeacherListResponse, TeacherDetailResponse, TeacherUpdateRequest
-from app.schemas.student import StudentListResponse, StudentDetailResponse, StudentUpdateRequest
+from app.schemas.teacher import TeacherListResponse, TeacherDetailResponse, TeacherUpdateRequest, ResetPasswordRequest as TeacherResetPasswordRequest, ResetPasswordResponse as TeacherResetPasswordResponse
+from app.schemas.student import StudentListResponse, StudentDetailResponse, StudentUpdateRequest, ResetPasswordRequest as StudentResetPasswordRequest, ResetPasswordResponse as StudentResetPasswordResponse
 from app.schemas.face_registration import (
     FaceRegistrationListResponse,
     FaceRegistrationListItem,
@@ -17,12 +17,19 @@ from app.schemas.face_registration import (
     FaceRegistrationApproveRequest,
     FaceRegistrationRejectRequest
 )
+from app.schemas.csv_import import (
+    StudentCSVPreviewResponse,
+    TeacherCSVPreviewResponse,
+    CSVImportConfirmRequest,
+    CSVImportResult
+)
 from app.services.teacher_service import TeacherService
 from app.services.student_service import StudentService
 from app.services.face_registration_service import FaceRegistrationDBService
 from app.services.ai_service_client import AIServiceClient, FaceImageData
 from app.services.face_embedding_service import FaceEmbeddingService
 from app.services.s3_service import S3Service
+from app.services.csv_import_service import CSVImportService
 
 
 router = APIRouter(prefix="/admin", tags=["Admin"])
@@ -291,6 +298,7 @@ async def get_face_registrations(
             student_id=reg.student_id,
             student_code=reg.student.student_code,
             student_name=reg.student.user.full_name,
+            student_is_verified=reg.student.is_verified,
             status=reg.status,
             total_images_captured=reg.total_images_captured or 0,
             registration_progress=reg.registration_progress or 0.0,
@@ -369,6 +377,7 @@ async def get_face_registration(
         student_code=reg.student.student_code,
         student_name=reg.student.user.full_name,
         student_email=reg.student.user.email,
+        student_is_verified=reg.student.is_verified,
         status=reg.status,
         total_images_captured=reg.total_images_captured or 0,
         registration_progress=reg.registration_progress or 0.0,
@@ -552,3 +561,151 @@ async def reject_face_registration(
         "rejection_reason": reg.rejection_reason,
         "reviewed_at": reg.admin_reviewed_at
     }
+
+
+# ============================================================================
+# PASSWORD RESET ENDPOINTS
+# ============================================================================
+
+@router.post(
+    "/teachers/{teacher_id}/reset-password",
+    response_model=TeacherResetPasswordResponse,
+    summary="Reset teacher password",
+    description="Reset password for a specific teacher. Admin only."
+)
+async def reset_teacher_password(
+    teacher_id: int,
+    request: TeacherResetPasswordRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_admin)
+):
+    """
+    Reset teacher password.
+    
+    - **teacher_id**: Teacher ID
+    - **new_password**: New password (min 8 characters, must contain uppercase, lowercase, and digit)
+    """
+    result = TeacherService.reset_password(
+        db=db,
+        teacher_id=teacher_id,
+        new_password=request.new_password
+    )
+    return result
+
+
+@router.post(
+    "/students/{student_id}/reset-password",
+    response_model=StudentResetPasswordResponse,
+    summary="Reset student password",
+    description="Reset password for a specific student. Admin only."
+)
+async def reset_student_password(
+    student_id: int,
+    request: StudentResetPasswordRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_admin)
+):
+    """
+    Reset student password.
+    
+    - **student_id**: Student ID
+    - **new_password**: New password (min 8 characters, must contain uppercase, lowercase, and digit)
+    """
+    result = StudentService.reset_password(
+        db=db,
+        student_id=student_id,
+        new_password=request.new_password
+    )
+    return result
+
+
+# ============================================================================
+# CSV IMPORT ENDPOINTS
+# ============================================================================
+
+@router.post(
+    "/students/import/preview",
+    response_model=StudentCSVPreviewResponse,
+    summary="Preview student CSV import",
+    description="Upload and validate student CSV file. Returns preview with validation results. Admin only."
+)
+async def preview_student_csv(
+    file: UploadFile = File(..., description="CSV file with student data"),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_admin)
+):
+    """
+    Preview student CSV import.
+    
+    Expected CSV format:
+    full_name,mssv,password,phone,department_name,academic_year,date_of_birth
+    
+    Returns validation results with valid/invalid row counts.
+    """
+    result = await CSVImportService.parse_student_csv(file, db)
+    return result
+
+
+@router.post(
+    "/students/import/confirm",
+    response_model=CSVImportResult,
+    summary="Confirm student CSV import",
+    description="Import validated student rows into database. Admin only."
+)
+async def confirm_student_import(
+    request: CSVImportConfirmRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_admin)
+):
+    """
+    Import validated students from CSV.
+    
+    Requires rows to have been validated via /students/import/preview first.
+    Only valid rows will be imported.
+    """
+    result = await CSVImportService.import_students(db, request.rows)
+    return result
+
+
+@router.post(
+    "/teachers/import/preview",
+    response_model=TeacherCSVPreviewResponse,
+    summary="Preview teacher CSV import",
+    description="Upload and validate teacher CSV file. Returns preview with validation results. Admin only."
+)
+async def preview_teacher_csv(
+    file: UploadFile = File(..., description="CSV file with teacher data"),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_admin)
+):
+    """
+    Preview teacher CSV import.
+    
+    Expected CSV format:
+    full_name,email,password,teacher_code,phone,department_name,specialization_name
+    
+    Returns validation results with valid/invalid row counts.
+    """
+    result = await CSVImportService.parse_teacher_csv(file, db)
+    return result
+
+
+@router.post(
+    "/teachers/import/confirm",
+    response_model=CSVImportResult,
+    summary="Confirm teacher CSV import",
+    description="Import validated teacher rows into database. Admin only."
+)
+async def confirm_teacher_import(
+    request: CSVImportConfirmRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_admin)
+):
+    """
+    Import validated teachers from CSV.
+    
+    Requires rows to have been validated via /teachers/import/preview first.
+    Only valid rows will be imported.
+    """
+    result = await CSVImportService.import_teachers(db, request.rows)
+    return result

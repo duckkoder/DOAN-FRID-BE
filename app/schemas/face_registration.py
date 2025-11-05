@@ -205,6 +205,7 @@ class FaceRegistrationListItem(BaseModel):
     student_id: int
     student_code: str = Field(..., description="Student code from student table")
     student_name: str = Field(..., description="Student full name")
+    student_is_verified: bool = Field(..., description="Student verification status")
     status: str
     total_images_captured: int
     registration_progress: float
@@ -226,6 +227,7 @@ class FaceRegistrationDetailResponse(BaseModel):
     student_code: str
     student_name: str
     student_email: str
+    student_is_verified: bool = Field(..., description="Student verification status")
     status: str
     total_images_captured: int
     registration_progress: float
