@@ -35,16 +35,6 @@ class AuthService:
                 detail="Email already registered"
             )
         
-        if request.role == "teacher" and request.teacher_code:
-            existing_teacher = db.query(Teacher).filter(
-                Teacher.teacher_code == request.teacher_code
-            ).first()
-            if existing_teacher:
-                raise HTTPException(
-                    status_code=status.HTTP_400_BAD_REQUEST,
-                    detail="Teacher code already exists"
-                )
-        
         if request.role == "student" and request.student_code:
             existing_student = db.query(Student).filter(
                 Student.student_code == request.student_code
@@ -100,7 +90,6 @@ class AuthService:
         if request.role == "teacher":
             teacher = Teacher(
                 user_id=new_user.id,
-                teacher_code=request.teacher_code,
                 department_id=request.department_id,
                 specialization_id=request.specialization_id,
             )
@@ -298,7 +287,6 @@ class AuthService:
             teacher = db.query(Teacher).filter(Teacher.user_id == user.id).first()
             if teacher:
                 user_data["teacher_id"] = teacher.id
-                user_data["teacher_code"] = teacher.teacher_code
                 user_data["department_id"] = teacher.department_id
                 user_data["specialization_id"] = teacher.specialization_id
                 

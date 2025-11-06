@@ -134,14 +134,6 @@ class TeacherCSVRow(BaseModel):
             raise ValueError(error_message)
         return v
     
-    @field_validator('teacher_code')
-    @classmethod
-    def validate_teacher_code(cls, v):
-        """Validate teacher code is not empty."""
-        if not v or not v.strip():
-            raise ValueError("Mã giáo viên không được để trống")
-        return v.strip()
-    
     @field_validator('phone')
     @classmethod
     def validate_phone(cls, v):

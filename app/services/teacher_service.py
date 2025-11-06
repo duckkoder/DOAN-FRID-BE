@@ -45,7 +45,6 @@ class TeacherService:
         # Apply filters
         if search:
             search_filter = or_(
-                Teacher.teacher_code.ilike(f"%{search}%"),
                 User.full_name.ilike(f"%{search}%"),
                 User.email.ilike(f"%{search}%")
             )
@@ -88,7 +87,6 @@ class TeacherService:
             teacher_data = TeacherResponse(
                 id=teacher.id,
                 user_id=teacher.user_id,
-                teacher_code=teacher.teacher_code,
                 department_id=teacher.department_id,
                 specialization_id=teacher.specialization_id,
                 department=department_name,
@@ -159,7 +157,6 @@ class TeacherService:
         teacher_data = TeacherResponse(
             id=teacher.id,
             user_id=teacher.user_id,
-            teacher_code=teacher.teacher_code,
             department_id=teacher.department_id,
             specialization_id=teacher.specialization_id,
             department=department_name,
@@ -253,7 +250,6 @@ class TeacherService:
         teacher_data = TeacherResponse(
             id=teacher.id,
             user_id=teacher.user_id,
-            teacher_code=teacher.teacher_code,
             department_id=teacher.department_id,
             specialization_id=teacher.specialization_id,
             department=department_name,
