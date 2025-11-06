@@ -6,7 +6,6 @@ from datetime import datetime
 
 class TeacherBase(BaseModel):
     """Base teacher schema."""
-    teacher_code: str = Field(..., max_length=20)
     department_id: Optional[int] = Field(None, description="Department ID")
     specialization_id: Optional[int] = Field(None, description="Specialization ID")
 
@@ -15,7 +14,6 @@ class TeacherResponse(BaseModel):
     """Teacher response schema with user info."""
     id: int
     user_id: int
-    teacher_code: str
     department_id: Optional[int] = None
     specialization_id: Optional[int] = None
     department: Optional[str] = None  # Department name for display

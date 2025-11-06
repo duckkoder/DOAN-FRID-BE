@@ -160,7 +160,7 @@ class CSVImportService:
         Parse and validate teacher CSV file.
         
         Expected CSV format:
-        full_name,email,password,teacher_code,phone,department_name,specialization_name
+        full_name,email,password,phone,department_name,specialization_name
         """
         if not file.filename.endswith('.csv'):
             raise HTTPException(
@@ -199,7 +199,6 @@ class CSVImportService:
                     full_name=row_data.get('full_name', '').strip(),
                     email=row_data.get('email', '').strip(),
                     password=row_data.get('password', '').strip(),
-                    teacher_code=row_data.get('teacher_code', '').strip(),
                     phone=row_data.get('phone', '').strip() or None,
                     department_name=row_data.get('department_name', '').strip() or None,
                     specialization_name=row_data.get('specialization_name', '').strip() or None,
@@ -305,7 +304,6 @@ class CSVImportService:
                                 field_map = {
                                     'email': 'Email',
                                     'password': 'Mật khẩu',
-                                    'teacher_code': 'Mã giáo viên',
                                     'full_name': 'Họ tên'
                                 }
                                 errors.append(f"{field_map.get(field_name, field_name)} không được để trống")
@@ -319,7 +317,6 @@ class CSVImportService:
                     full_name=row_data.get('full_name', '').strip() or 'N/A',
                     email=row_data.get('email', '').strip() or 'N/A',
                     password='***',
-                    teacher_code=row_data.get('teacher_code', '').strip() or 'N/A',
                     phone=row_data.get('phone', '').strip() or None,
                     department_name=row_data.get('department_name', '').strip() or None,
                     specialization_name=row_data.get('specialization_name', '').strip() or None,
@@ -505,7 +502,6 @@ class CSVImportService:
                     password=row['password'],
                     role='teacher',
                     phone=row.get('phone'),
-                    teacher_code=row['teacher_code'],
                     department_id=department_id,
                     specialization_id=specialization_id
                 )
@@ -555,8 +551,7 @@ class CSVImportService:
                                 field_map = {
                                     'email': 'Email',
                                     'password': 'Mật khẩu',
-                                    'full_name': 'Họ tên',
-                                    'teacher_code': 'Mã giáo viên'
+                                    'full_name': 'Họ tên'
                                 }
                                 parsed_errors.append(f"{field_map.get(field_name, field_name)} không được để trống")
                                 i += 1
@@ -568,10 +563,7 @@ class CSVImportService:
                 elif "already registered" in error_msg.lower():
                     error_msg = f"Email {row.get('email')} đã được đăng ký"
                 elif "already exists" in error_msg.lower():
-                    if "teacher code" in error_msg.lower():
-                        error_msg = f"Mã giáo viên {row.get('teacher_code')} đã tồn tại"
-                    else:
-                        error_msg = f"Email {row.get('email')} đã tồn tại trong hệ thống"
+                    error_msg = f"Email {row.get('email')} đã tồn tại trong hệ thống"
                 
                 errors.append({
                     "row": idx + 1,

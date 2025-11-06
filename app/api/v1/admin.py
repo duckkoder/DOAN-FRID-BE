@@ -682,7 +682,7 @@ async def preview_teacher_csv(
     Preview teacher CSV import.
     
     Expected CSV format:
-    full_name,email,password,teacher_code,phone,department_name,specialization_name
+    full_name,email,password,phone,department_name,specialization_name
     
     Returns validation results with valid/invalid row counts.
     """
