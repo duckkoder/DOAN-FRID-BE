@@ -248,7 +248,6 @@ class CSVImportService:
                                 field_map = {
                                     'email': 'Email',
                                     'password': 'Mật khẩu',
-                                    'teacher_code': 'Mã giáo viên',
                                     'full_name': 'Họ tên'
                                 }
                                 errors.append(f"{field_map.get(field_name, field_name)} không được để trống")
@@ -263,7 +262,6 @@ class CSVImportService:
                     full_name=row_data.get('full_name', '').strip() or 'N/A',
                     email=row_data.get('email', '').strip() or 'N/A',
                     password='***',
-                    teacher_code=row_data.get('teacher_code', '').strip() or 'N/A',
                     phone=row_data.get('phone', '').strip() or None,
                     department_name=row_data.get('department_name', '').strip() or None,
                     specialization_name=row_data.get('specialization_name', '').strip() or None,

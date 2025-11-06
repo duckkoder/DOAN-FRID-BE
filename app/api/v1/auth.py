@@ -26,8 +26,7 @@ async def register(
 ):
     """
     Register a new user (teacher or student).
-    Teacher requires `teacher_code`
-    , Student requires `student_code`.
+    Student requires `student_code`.
     """
     from app.services.auth_service import AuthService
     

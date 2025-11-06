@@ -104,7 +104,6 @@ class TeacherCSVRow(BaseModel):
     full_name: str = Field(..., min_length=2, max_length=255)
     email: str = Field(..., description="Email prefix (before @dut.udn.vn)")
     password: str = Field(..., min_length=8, max_length=100)
-    teacher_code: str = Field(..., max_length=50)
     phone: Optional[str] = Field(None, max_length=50)
     department_name: Optional[str] = Field(None)
     specialization_name: Optional[str] = Field(None)
