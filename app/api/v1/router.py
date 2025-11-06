@@ -6,6 +6,7 @@ from app.api.v1 import studentClassAPI
 from app.api.v1 import auth, admin, files, department, specialization, attendance, face_registration
 from app.api.v1 import studentDashboard
 from app.api.v1 import studentAttendanceAPI
+from app.api.v1 import teacher, student
 
 
 # Create main API router
@@ -19,6 +20,10 @@ api_router.include_router(teacherClassAPI.router, tags=["Teacher Classes"])
 api_router.include_router(studentClassAPI.router, tags=["Student Classes"])
 api_router.include_router(studentDashboard.router, tags=["Student Dashboard"])
 api_router.include_router(studentAttendanceAPI.router, tags=["Student Attendance"])
+
+# Include profile routers
+api_router.include_router(teacher.router, tags=["Teacher Profile"])
+api_router.include_router(student.router, tags=["Student Profile"])
 
 api_router.include_router(admin.router, tags=["Admin"])
 api_router.include_router(files.router, tags=["Files"])

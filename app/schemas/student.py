@@ -36,7 +36,7 @@ class StudentResponse(BaseModel):
 
 
 class StudentUpdateRequest(BaseModel):
-    """Request to update student information."""
+    """Request to update student information (Admin)."""
     department_id: Optional[int] = Field(None, description="Department ID")
     academic_year: Optional[str] = Field(None, max_length=10, description="Academic year")
     date_of_birth: Optional[date] = Field(None, description="Date of birth")
@@ -44,6 +44,42 @@ class StudentUpdateRequest(BaseModel):
     avatar_url: Optional[str] = Field(None, description="Avatar URL (S3)")
     is_active: Optional[bool] = Field(None, description="Active status")
     is_verified: Optional[bool] = Field(None, description="Verification status")
+
+
+class StudentProfileUpdateRequest(BaseModel):
+    """Request to update student own profile."""
+    full_name: Optional[str] = Field(None, min_length=2, max_length=255, description="Full name")
+    phone: Optional[str] = Field(None, max_length=50, description="Phone number")
+    date_of_birth: Optional[date] = Field(None, description="Date of birth")
+    department_id: Optional[int] = Field(None, description="Department ID")
+    academic_year: Optional[str] = Field(None, max_length=10, description="Academic year")
+
+
+class UpdateAvatarRequest(BaseModel):
+    """Request to update avatar URL."""
+    avatar_url: str = Field(..., description="Avatar URL (S3)")
+
+
+class ChangePasswordRequest(BaseModel):
+    """Request to change password (requires old password)."""
+    old_password: str = Field(..., description="Current password")
+    new_password: str = Field(..., min_length=8, max_length=100, description="New password (min 8 characters)")
+    
+    @field_validator('new_password')
+    @classmethod
+    def validate_password(cls, v):
+        """Validate password strength."""
+        from app.utils.validators import validate_password_strength
+        is_valid, error_message = validate_password_strength(v)
+        if not is_valid:
+            raise ValueError(error_message)
+        return v
+
+
+class ChangePasswordResponse(BaseModel):
+    """Response after password change."""
+    success: bool
+    message: str
 
 
 class ResetPasswordRequest(BaseModel):
