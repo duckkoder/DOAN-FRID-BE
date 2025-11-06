@@ -53,7 +53,6 @@ def get_teacher_profile(
     return TeacherResponse(
         id=teacher.id,
         user_id=teacher.user_id,
-        teacher_code=teacher.teacher_code,
         department_id=teacher.department_id,
         specialization_id=teacher.specialization_id,
         department=department_name,
@@ -86,6 +85,20 @@ def update_teacher_profile(
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Teacher profile not found"
+        )
+    
+    # Check if at least one field is provided
+    has_update = any([
+        update_data.full_name is not None,
+        update_data.phone is not None,
+        update_data.department_id is not None,
+        update_data.specialization_id is not None
+    ])
+    
+    if not has_update:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="At least one field must be provided for update"
         )
     
     # Update user fields
@@ -134,7 +147,6 @@ def update_teacher_profile(
     return TeacherResponse(
         id=teacher.id,
         user_id=teacher.user_id,
-        teacher_code=teacher.teacher_code,
         department_id=teacher.department_id,
         specialization_id=teacher.specialization_id,
         department=department_name,
@@ -191,7 +203,6 @@ def update_teacher_avatar(
     return TeacherResponse(
         id=teacher.id,
         user_id=teacher.user_id,
-        teacher_code=teacher.teacher_code,
         department_id=teacher.department_id,
         specialization_id=teacher.specialization_id,
         department=department_name,

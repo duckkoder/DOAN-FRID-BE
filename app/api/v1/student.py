@@ -82,6 +82,21 @@ def update_student_profile(
             detail="Student profile not found"
         )
     
+    # Check if at least one field is provided
+    has_update = any([
+        update_data.full_name is not None,
+        update_data.phone is not None,
+        update_data.date_of_birth is not None,
+        update_data.department_id is not None,
+        update_data.academic_year is not None
+    ])
+    
+    if not has_update:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="At least one field must be provided for update"
+        )
+    
     # Update user fields
     if update_data.full_name is not None:
         current_user.full_name = update_data.full_name
