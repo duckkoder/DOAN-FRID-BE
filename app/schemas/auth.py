@@ -13,7 +13,6 @@ class RegisterRequest(BaseModel):
     avatar_url: Optional[str] = Field(None, description="Avatar URL (S3)")
     
     # Teacher-specific
-    teacher_code: Optional[str] = Field(None, max_length=50, description="Teacher code (required if role=teacher)")
     department_id: Optional[int] = Field(None, description="Department ID (optional for teacher)")
     specialization_id: Optional[int] = Field(None, description="Specialization ID (optional for teacher)")
     
@@ -64,8 +63,6 @@ class RegisterRequest(BaseModel):
         """Validate role-specific required fields and extract student_code from email."""
         from app.utils.validators import extract_student_code_from_email
         
-        if self.role == 'teacher' and not self.teacher_code:
-            raise ValueError('teacher_code is required for teacher role')
         if self.role == 'student':
             # Auto-extract student_code from email
             student_code_from_email = extract_student_code_from_email(self.email)
@@ -94,7 +91,6 @@ class RegisterRequest(BaseModel):
                     "password": "Teacher123",
                     "role": "teacher",
                     "phone": "0987654321",
-                    "teacher_code": "GV001",
                     "department_id": 1,
                     "specialization_id": 2
                 }
@@ -117,16 +113,15 @@ class UserResponse(BaseModel):
     
     # Role-specific info
     teacher_id: Optional[int] = None
-    teacher_code: Optional[str] = None
-    department_id: Optional[int] = None
-    specialization_id: Optional[int] = None
-    department: Optional[str] = None  # Department name for display
-    specialization: Optional[str] = None  # Specialization name for display
+    teacher_department_id: Optional[int] = None  # For teacher
+    teacher_specialization_id: Optional[int] = None  # For teacher
+    teacher_department: Optional[str] = None  # Department name for teacher display
+    teacher_specialization: Optional[str] = None  # Specialization name for teacher display
 
     student_id: Optional[int] = None
     student_code: Optional[str] = None
-    department_id: Optional[int] = None  # For student
-    department: Optional[str] = None  # Department name for display (for both teacher and student)
+    student_department_id: Optional[int] = None  # For student
+    student_department: Optional[str] = None  # Department name for student display
     academic_year: Optional[int] = None
 
     model_config = {"from_attributes": True}
