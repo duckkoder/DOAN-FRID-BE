@@ -31,26 +31,6 @@ class RegisterRequest(BaseModel):
             raise ValueError(error_message)
         return v
     
-    @field_validator('email')
-    @classmethod
-    def validate_email_format(cls, v, info):
-        """Validate email format based on role."""
-        from app.utils.validators import validate_student_email, validate_teacher_email
-        
-        # Get role from context (if available during validation)
-        role = info.data.get('role')
-        
-        if role == 'student':
-            is_valid, error_message = validate_student_email(v)
-            if not is_valid:
-                raise ValueError(error_message)
-        elif role == 'teacher':
-            is_valid, error_message = validate_teacher_email(v)
-            if not is_valid:
-                raise ValueError(error_message)
-        
-        return v
-    
     @field_validator('role')
     @classmethod
     def validate_role(cls, v):
@@ -59,17 +39,32 @@ class RegisterRequest(BaseModel):
         return v
     
     @model_validator(mode='after')
-    def validate_role_specific_fields(self):
-        """Validate role-specific required fields and extract student_code from email."""
-        from app.utils.validators import extract_student_code_from_email
+    def validate_email_and_role_specific_fields(self):
+        """Validate email format based on role and role-specific required fields."""
+        from app.utils.validators import (
+            validate_student_email, 
+            validate_teacher_email,
+            extract_student_code_from_email
+        )
         
+        # Validate email format based on role
         if self.role == 'student':
+            is_valid, error_message = validate_student_email(self.email)
+            if not is_valid:
+                raise ValueError(error_message)
+            
             # Auto-extract student_code from email
             student_code_from_email = extract_student_code_from_email(self.email)
             if student_code_from_email:
                 self.student_code = student_code_from_email
             elif not self.student_code:
                 raise ValueError('student_code is required for student role')
+                
+        elif self.role == 'teacher':
+            is_valid, error_message = validate_teacher_email(self.email)
+            if not is_valid:
+                raise ValueError(error_message)
+        
         return self
 
     model_config = {
