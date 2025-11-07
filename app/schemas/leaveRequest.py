@@ -8,16 +8,45 @@ class CreateLeaveRequestRequest(BaseModel):
     class_id: int = Field(..., description="Class ID")
     reason: str = Field(..., min_length=10, max_length=1000, description="Reason for leave")
     leave_date: datetime = Field(..., description="Date of leave (YYYY-MM-DD)")
-    day_of_week: str = Field(..., description="Day of week (e.g., Monday)")
-    time_slot: Optional[str] = Field(None, max_length=50, description="Time slot (1-3)")
+    day_of_week: str = Field(..., description="Day of week (Monday, Tuesday, Wednesday, Thursday, Friday, Saturday, Sunday)")
+    time_slot: str = Field(..., description="Time slot in format 'x-y' where x,y are 1-10 (e.g., '1-3', '6-10')")
     evidence_file_id: Optional[int] = Field(None, description="ID of uploaded evidence file")
     
     @field_validator('day_of_week')
     @classmethod
     def validate_day_of_week(cls, v):
+        """Validate day of week - must be capitalized format (e.g., Monday)."""
         valid_days = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday']
+        # Check if input is in correct capitalized format
         if v not in valid_days:
-            raise ValueError(f"day_of_week must be one of: {', '.join(valid_days)}")
+            raise ValueError(f"day_of_week must be one of: {', '.join(valid_days)} (first letter capitalized)")
+        return v
+    
+    @field_validator('time_slot')
+    @classmethod
+    def validate_time_slot(cls, v):
+        """Validate time slot format: 'x-y' where x,y are 1-10."""
+        import re
+        if not v:
+            raise ValueError("time_slot is required")
+        
+        # Check format x-y
+        pattern = r'^(\d+)-(\d+)$'
+        match = re.match(pattern, v)
+        if not match:
+            raise ValueError("time_slot must be in format 'x-y' (e.g., '1-3', '6-10')")
+        
+        start = int(match.group(1))
+        end = int(match.group(2))
+        
+        # Check range 1-10
+        if start < 1 or start > 10 or end < 1 or end > 10:
+            raise ValueError("time_slot periods must be between 1 and 10")
+        
+        # Check start <= end
+        if start > end:
+            raise ValueError("time_slot start must be less than or equal to end")
+        
         return v
     
     model_config = {
@@ -41,16 +70,43 @@ class UpdateLeaveRequestRequest(BaseModel):
     reason: Optional[str] = Field(None, min_length=10, max_length=1000)
     leave_date: Optional[datetime] = None
     day_of_week: Optional[str] = None
-    time_slot: Optional[str] = Field(None, max_length=50)
+    time_slot: Optional[str] = None
     evidence_file_id: Optional[int] = None
     
     @field_validator('day_of_week')
     @classmethod
     def validate_day_of_week(cls, v):
+        """Validate day of week - must be capitalized format (e.g., Monday)."""
         if v is not None:
             valid_days = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday']
+            # Check if input is in correct capitalized format
             if v not in valid_days:
-                raise ValueError(f"day_of_week must be one of: {', '.join(valid_days)}")
+                raise ValueError(f"day_of_week must be one of: {', '.join(valid_days)} (first letter capitalized)")
+        return v
+    
+    @field_validator('time_slot')
+    @classmethod
+    def validate_time_slot(cls, v):
+        """Validate time slot format: 'x-y' where x,y are 1-10."""
+        if v is not None:
+            import re
+            # Check format x-y
+            pattern = r'^(\d+)-(\d+)$'
+            match = re.match(pattern, v)
+            if not match:
+                raise ValueError("time_slot must be in format 'x-y' (e.g., '1-3', '6-10')")
+            
+            start = int(match.group(1))
+            end = int(match.group(2))
+            
+            # Check range 1-10
+            if start < 1 or start > 10 or end < 1 or end > 10:
+                raise ValueError("time_slot periods must be between 1 and 10")
+            
+            # Check start <= end
+            if start > end:
+                raise ValueError("time_slot start must be less than or equal to end")
+        
         return v
 
 
