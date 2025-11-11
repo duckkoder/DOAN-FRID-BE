@@ -306,8 +306,10 @@ class AttendanceService:
                 detail="Session not found"
             )
         
-        # 3. Process validated students
+        # 3. Process validated students với confidence threshold logic
         processed_count = 0
+        pending_count = 0
+        auto_approved_count = 0
         
         for validated_student in payload.validated_students:
             # Tìm student trong class
@@ -338,9 +340,35 @@ class AttendanceService:
                 )
                 continue
             
-            # Tất cả sinh viên được nhận diện đều đánh dấu là PRESENT
-            # Không có logic late (đi muộn)
-            attendance_status = AttendanceStatus.PRESENT
+            # ✅ HYBRID APPROACH: Kiểm tra confidence để quyết định status
+            confidence = validated_student.avg_confidence
+            
+            if confidence >= settings.AI_CONFIDENCE_THRESHOLD:
+                # Confidence cao → Tự động xác nhận là PRESENT
+                attendance_status = AttendanceStatus.PRESENT
+                notes = f"AI-validated (track_id={validated_student.track_id}, frames={validated_student.frame_count}, confidence={confidence:.3f}, auto-approved)"
+                auto_approved_count += 1
+                logger.info(
+                    f"✅ Auto-approved attendance (high confidence)",
+                    extra={
+                        "student_code": validated_student.student_code,
+                        "confidence": confidence,
+                        "threshold": settings.AI_CONFIDENCE_THRESHOLD
+                    }
+                )
+            else:
+                # Confidence thấp → Chờ giáo viên xác nhận (PENDING)
+                attendance_status = AttendanceStatus.PENDING
+                notes = f"Pending teacher confirmation (track_id={validated_student.track_id}, frames={validated_student.frame_count}, confidence={confidence:.3f})"
+                pending_count += 1
+                logger.warning(
+                    f"⏳ Pending teacher confirmation (low confidence)",
+                    extra={
+                        "student_code": validated_student.student_code,
+                        "confidence": confidence,
+                        "threshold": settings.AI_CONFIDENCE_THRESHOLD
+                    }
+                )
             
             # Tạo attendance record
             new_record = AttendanceRecord(
@@ -349,11 +377,42 @@ class AttendanceService:
                 status=attendance_status,
                 recorded_at=validated_student.validation_passed_at,
                 confidence_score=validated_student.avg_confidence,
-                notes=f"AI-validated (track_id={validated_student.track_id}, frames={validated_student.frame_count})"
+                notes=notes
             )
             
             self.db.add(new_record)
+            self.db.flush()  # ✅ Flush để có ID ngay (cần cho WebSocket notification)
+            
             processed_count += 1
+            
+            # ✅ Nếu PENDING, gửi realtime notification qua WebSocket
+            if attendance_status == AttendanceStatus.PENDING:
+                try:
+                    # Import ở đây để tránh circular import
+                    from app.api.v1.attendance import manager
+                    from app.schemas.attendance import WSPendingConfirmation
+                    
+                    # Broadcast pending confirmation tới giáo viên trong phiên
+                    import asyncio
+                    asyncio.create_task(
+                        manager.broadcast_to_session(
+                            session.id,
+                            WSPendingConfirmation(
+                                type="pending_confirmation",
+                                session_id=session.id,
+                                record_id=new_record.id,
+                                student_id=student.id,
+                                student_code=student.student_code,
+                                full_name=student.user.full_name,
+                                confidence_score=validated_student.avg_confidence,
+                                recorded_at=validated_student.validation_passed_at,
+                                message=f"Sinh viên {student.user.full_name} cần xác nhận (confidence: {confidence:.1%})"
+                            ).model_dump()
+                        )
+                    )
+                    logger.info(f"📢 Sent pending confirmation notification for student {student.student_code}")
+                except Exception as ws_error:
+                    logger.error(f"Failed to send WebSocket notification: {ws_error}")
             
             logger.info(
                 f"Attendance record created",
@@ -370,7 +429,7 @@ class AttendanceService:
         return AICallbackResponse(
             status="ok",
             processed_students=processed_count,
-            message=f"Processed {processed_count} students successfully"
+            message=f"Processed {processed_count} students ({auto_approved_count} auto-approved, {pending_count} pending confirmation)"
         )
     
     async def end_session(
@@ -514,6 +573,7 @@ class AttendanceService:
         present_count = sum(1 for r in records if r.status == AttendanceStatus.PRESENT)
         absent_count = sum(1 for r in records if r.status == AttendanceStatus.ABSENT)
         excused_count = sum(1 for r in records if r.status == AttendanceStatus.EXCUSED)
+        pending_count = sum(1 for r in records if r.status == AttendanceStatus.PENDING)  # ✅ NEW
         
         # Chỉ tính present, không tính late vì không có trạng thái late
         attendance_rate = present_count / total_students * 100 if total_students > 0 else 0
@@ -526,6 +586,7 @@ class AttendanceService:
             present_count=present_count,
             absent_count=absent_count,
             excused_count=excused_count,
+            pending_count=pending_count,  # ✅ NEW
             attendance_rate=round(attendance_rate, 2)
         )
     
@@ -599,12 +660,14 @@ class AttendanceService:
         present_count = sum(1 for r in records if r.status == AttendanceStatus.PRESENT)
         absent_count = sum(1 for r in records if r.status == AttendanceStatus.ABSENT)
         excused_count = sum(1 for r in records if r.status == AttendanceStatus.EXCUSED)
+        pending_count = sum(1 for r in records if r.status == AttendanceStatus.PENDING)  # ✅ NEW
         
         statistics = {
             "total_students": total_students,
             "present_count": present_count,
             "absent_count": absent_count,
             "excused_count": excused_count,
+            "pending_count": pending_count,  # ✅ NEW
             "attendance_rate": round(present_count / total_students * 100, 2) if total_students > 0 else 0
         }
         
@@ -703,6 +766,7 @@ class AttendanceService:
             present_count = sum(1 for r in records if r.status == AttendanceStatus.PRESENT)
             absent_count = sum(1 for r in records if r.status == AttendanceStatus.ABSENT)
             excused_count = sum(1 for r in records if r.status == AttendanceStatus.EXCUSED)
+            pending_count = sum(1 for r in records if r.status == AttendanceStatus.PENDING)  # ✅ NEW
             
             session_data = SessionResponse.model_validate(session).model_dump()
             session_data["statistics"] = {
@@ -710,6 +774,7 @@ class AttendanceService:
                 "present_count": present_count,
                 "absent_count": absent_count,
                 "excused_count": excused_count,
+                "pending_count": pending_count,  # ✅ NEW
                 "attendance_rate": round(present_count / total_students * 100, 2) if total_students > 0 else 0
             }
             session_responses.append(session_data)

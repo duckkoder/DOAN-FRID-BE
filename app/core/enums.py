@@ -26,13 +26,15 @@ class SessionStatus(str, Enum):
 class AttendanceStatus(str, Enum):
     """Attendance record status enumeration.
     
-    Chỉ có 3 trạng thái:
-    - PRESENT: Có mặt (được nhận diện hoặc xác nhận)
+    Các trạng thái:
+    - PENDING: Chờ giáo viên xác nhận (confidence thấp < threshold)
+    - PRESENT: Có mặt (được nhận diện với confidence cao hoặc đã được xác nhận)
     - ABSENT: Vắng không phép
     - EXCUSED: Vắng có phép (có đơn xin nghỉ được duyệt)
     
     KHÔNG có trạng thái LATE (đi muộn)
     """
+    PENDING = "pending"  # ✅ NEW STATUS - Chờ xác nhận
     PRESENT = "present"
     ABSENT = "absent"
     EXCUSED = "excused"
