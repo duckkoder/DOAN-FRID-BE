@@ -17,6 +17,7 @@ from app.schemas.leaveRequest import (
     ReviewLeaveRequestRequest
 )
 from app.services.file_service import FileService
+from app.core.exceptions import ValidationError  # Import custom ValidationError
 
 
 class LeaveRequestService:
@@ -89,9 +90,10 @@ class LeaveRequestService:
         day_key = payload.day_of_week.lower()  # Convert "Monday" -> "monday" for DB lookup
         
         if day_key not in schedule_data:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail=f"Class does not have schedule on {payload.day_of_week}"
+            raise ValidationError(
+                field="day_of_week",
+                message=f"Class does not have schedule on {payload.day_of_week}",
+                value=payload.day_of_week
             )
         
         # Parse time_slot to get start and end periods
@@ -103,9 +105,10 @@ class LeaveRequestService:
         # Get class periods from schedule (e.g., ["1-3", "6-9"])
         class_periods = schedule_data[day_key]
         if not class_periods:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail=f"Class does not have any periods scheduled on {payload.day_of_week}"
+            raise ValidationError(
+                field="day_of_week",
+                message=f"Class does not have any periods scheduled on {payload.day_of_week}",
+                value=payload.day_of_week
             )
         
         # Convert class periods to set of individual periods
@@ -121,9 +124,10 @@ class LeaveRequestService:
         
         # Check if requested periods are within class schedule
         if not request_periods.issubset(all_class_periods):
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail=f"Time slot {payload.time_slot} does not match class schedule on {payload.day_of_week}. Class periods: {class_periods}"
+            raise ValidationError(
+                field="time_slot",
+                message=f"Time slot {payload.time_slot} does not match class schedule on {payload.day_of_week}. Class periods: {class_periods}",
+                value=payload.time_slot
             )
         
         # Verify evidence file if provided

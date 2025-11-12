@@ -22,7 +22,15 @@ from app.schemas.attendance import (
     WSStudentAttendanceUpdate,
     StartSessionWithAIResponse,
     AICallbackPayload,
-    AICallbackResponse
+    AICallbackResponse,
+    PendingStudentsResponse,
+    PendingStudentDetail,
+    ConfirmAttendanceRequest,
+    ConfirmAttendanceResponse,
+    RejectAttendanceRequest,
+    ConfirmAllPendingResponse,
+    AttendanceRecordDetail,
+    WSPendingConfirmation
 )
 from app.services.attendance_service import AttendanceService
 
@@ -447,5 +455,390 @@ async def get_current_session_attendance_for_student(
             "absent_count": sum(1 for s in students_data if not s["is_present"])
         }
     }
+
+
+# ============= Teacher Confirmation APIs (Hybrid Approach) =============
+
+@router.get("/sessions/{session_id}/pending-students", response_model=PendingStudentsResponse)
+async def get_pending_students(
+    session_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """
+    Lấy danh sách sinh viên chờ xác nhận (status = PENDING).
+    
+    **Chỉ giáo viên của lớp mới có quyền truy cập.**
+    
+    Returns:
+        - pending_count: Số lượng sinh viên chờ xác nhận
+        - students: Danh sách sinh viên với thông tin chi tiết
+    """
+    from app.core.enums import UserRole, AttendanceStatus
+    from app.models.teacher import Teacher
+    from app.models.class_model import Class
+    
+    # Kiểm tra role
+    if current_user.role != UserRole.TEACHER:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Chỉ giáo viên mới có thể xem danh sách chờ xác nhận"
+        )
+    
+    # Kiểm tra quyền sở hữu session
+    session = db.query(AttendanceSession).filter(
+        AttendanceSession.id == session_id
+    ).first()
+    
+    if not session:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Không tìm thấy phiên điểm danh"
+        )
+    
+    teacher = db.query(Teacher).filter(Teacher.user_id == current_user.id).first()
+    class_obj = db.query(Class).filter(Class.id == session.class_id).first()
+    
+    if not class_obj or class_obj.teacher_id != teacher.id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Bạn không có quyền với phiên này"
+        )
+    
+    # Lấy các record có status = PENDING
+    pending_records = db.query(AttendanceRecord).filter(
+        AttendanceRecord.session_id == session_id,
+        AttendanceRecord.status == AttendanceStatus.PENDING
+    ).all()
+    
+    students = [
+        PendingStudentDetail(
+            record_id=record.id,
+            student_id=record.student_id,
+            student_code=record.student.student_code,
+            full_name=record.student.user.full_name,
+            confidence_score=record.confidence_score,
+            recorded_at=record.recorded_at
+        )
+        for record in pending_records
+    ]
+    
+    return PendingStudentsResponse(
+        pending_count=len(students),
+        students=students
+    )
+
+
+@router.post("/records/{record_id}/confirm", response_model=ConfirmAttendanceResponse)
+async def confirm_attendance(
+    record_id: int,
+    request: ConfirmAttendanceRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """
+    Xác nhận điểm danh cho một sinh viên (chuyển từ PENDING → PRESENT).
+    
+    **Chỉ giáo viên của lớp mới có quyền.**
+    
+    Body:
+        - status: "present" (mặc định)
+        - notes: Ghi chú (tùy chọn)
+    """
+    from app.core.enums import UserRole, AttendanceStatus
+    from app.models.teacher import Teacher
+    from app.models.class_model import Class
+    from datetime import datetime
+    from zoneinfo import ZoneInfo
+    
+    VIETNAM_TZ = ZoneInfo('Asia/Ho_Chi_Minh')
+    
+    # Kiểm tra role
+    if current_user.role != UserRole.TEACHER:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Chỉ giáo viên mới có thể xác nhận điểm danh"
+        )
+    
+    # Lấy record
+    record = db.query(AttendanceRecord).filter(
+        AttendanceRecord.id == record_id
+    ).first()
+    
+    if not record:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Không tìm thấy bản ghi điểm danh"
+        )
+    
+    # Kiểm tra quyền sở hữu
+    session = db.query(AttendanceSession).filter(
+        AttendanceSession.id == record.session_id
+    ).first()
+    
+    teacher = db.query(Teacher).filter(Teacher.user_id == current_user.id).first()
+    class_obj = db.query(Class).filter(Class.id == session.class_id).first()
+    
+    if not class_obj or class_obj.teacher_id != teacher.id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Bạn không có quyền với phiên này"
+        )
+    
+    # Kiểm tra status hiện tại
+    if record.status != AttendanceStatus.PENDING:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Bản ghi không ở trạng thái chờ xác nhận (status: {record.status})"
+        )
+    
+    # Cập nhật status
+    record.status = AttendanceStatus.PRESENT
+    if request.notes:
+        existing_notes = record.notes or ""
+        record.notes = f"{existing_notes} | Teacher confirmed: {request.notes}"
+    else:
+        existing_notes = record.notes or ""
+        record.notes = f"{existing_notes} | Teacher confirmed"
+    
+    record.updated_at = datetime.now(VIETNAM_TZ)
+    
+    db.commit()
+    db.refresh(record)
+    
+    # Broadcast confirmation update qua WebSocket
+    await manager.broadcast_to_session(
+        session.id,
+        {
+            "type": "confirmation_update",
+            "session_id": session.id,
+            "student_id": record.student_id,
+            "student_code": record.student.student_code,
+            "full_name": record.student.user.full_name,
+            "status": "present",
+            "confirmed_by": teacher.user.full_name,
+            "confirmed_at": datetime.now(VIETNAM_TZ).isoformat()
+        }
+    )
+    
+    return ConfirmAttendanceResponse(
+        success=True,
+        record=AttendanceRecordDetail(
+            id=record.id,
+            session_id=record.session_id,
+            student_id=record.student_id,
+            student_code=record.student.student_code,
+            student_name=record.student.user.full_name,
+            status=record.status,
+            confidence_score=record.confidence_score,
+            recorded_at=record.recorded_at,
+            notes=record.notes
+        )
+    )
+
+
+@router.post("/records/{record_id}/reject", response_model=ConfirmAttendanceResponse)
+async def reject_attendance(
+    record_id: int,
+    request: RejectAttendanceRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """
+    Từ chối điểm danh (chuyển từ PENDING → ABSENT).
+    
+    **Chỉ giáo viên của lớp mới có quyền.**
+    
+    Body:
+        - reason: Lý do từ chối (tùy chọn)
+    """
+    from app.core.enums import UserRole, AttendanceStatus
+    from app.models.teacher import Teacher
+    from app.models.class_model import Class
+    from datetime import datetime
+    from zoneinfo import ZoneInfo
+    
+    VIETNAM_TZ = ZoneInfo('Asia/Ho_Chi_Minh')
+    
+    # Kiểm tra role
+    if current_user.role != UserRole.TEACHER:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Chỉ giáo viên mới có thể từ chối điểm danh"
+        )
+    
+    # Lấy record
+    record = db.query(AttendanceRecord).filter(
+        AttendanceRecord.id == record_id
+    ).first()
+    
+    if not record:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Không tìm thấy bản ghi điểm danh"
+        )
+    
+    # Kiểm tra quyền sở hữu
+    session = db.query(AttendanceSession).filter(
+        AttendanceSession.id == record.session_id
+    ).first()
+    
+    teacher = db.query(Teacher).filter(Teacher.user_id == current_user.id).first()
+    class_obj = db.query(Class).filter(Class.id == session.class_id).first()
+    
+    if not class_obj or class_obj.teacher_id != teacher.id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Bạn không có quyền với phiên này"
+        )
+    
+    # Kiểm tra status hiện tại
+    if record.status != AttendanceStatus.PENDING:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Bản ghi không ở trạng thái chờ xác nhận (status: {record.status})"
+        )
+    
+    # Chuyển sang ABSENT
+    record.status = AttendanceStatus.ABSENT
+    if request.reason:
+        existing_notes = record.notes or ""
+        record.notes = f"{existing_notes} | Teacher rejected: {request.reason}"
+    else:
+        existing_notes = record.notes or ""
+        record.notes = f"{existing_notes} | Teacher rejected (wrong recognition)"
+    
+    record.updated_at = datetime.now(VIETNAM_TZ)
+    
+    db.commit()
+    db.refresh(record)
+    
+    # Broadcast rejection update qua WebSocket
+    await manager.broadcast_to_session(
+        session.id,
+        {
+            "type": "confirmation_update",
+            "session_id": session.id,
+            "student_id": record.student_id,
+            "student_code": record.student.student_code,
+            "full_name": record.student.user.full_name,
+            "status": "absent",
+            "confirmed_by": teacher.user.full_name,
+            "confirmed_at": datetime.now(VIETNAM_TZ).isoformat()
+        }
+    )
+    
+    return ConfirmAttendanceResponse(
+        success=True,
+        record=AttendanceRecordDetail(
+            id=record.id,
+            session_id=record.session_id,
+            student_id=record.student_id,
+            student_code=record.student.student_code,
+            student_name=record.student.user.full_name,
+            status=record.status,
+            confidence_score=record.confidence_score,
+            recorded_at=record.recorded_at,
+            notes=record.notes
+        )
+    )
+
+
+@router.post("/sessions/{session_id}/confirm-all-pending", response_model=ConfirmAllPendingResponse)
+async def confirm_all_pending(
+    session_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """
+    Xác nhận tất cả sinh viên chờ xác nhận trong phiên (chuyển tất cả PENDING → PRESENT).
+    
+    **Chỉ giáo viên của lớp mới có quyền.**
+    
+    Use case: Khi giáo viên tin tưởng vào kết quả AI và muốn xác nhận hàng loạt.
+    """
+    from app.core.enums import UserRole, AttendanceStatus
+    from app.models.teacher import Teacher
+    from app.models.class_model import Class
+    from datetime import datetime
+    from zoneinfo import ZoneInfo
+    
+    VIETNAM_TZ = ZoneInfo('Asia/Ho_Chi_Minh')
+    
+    # Kiểm tra role
+    if current_user.role != UserRole.TEACHER:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Chỉ giáo viên mới có thể xác nhận điểm danh"
+        )
+    
+    # Kiểm tra quyền sở hữu session
+    session = db.query(AttendanceSession).filter(
+        AttendanceSession.id == session_id
+    ).first()
+    
+    if not session:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Không tìm thấy phiên điểm danh"
+        )
+    
+    teacher = db.query(Teacher).filter(Teacher.user_id == current_user.id).first()
+    class_obj = db.query(Class).filter(Class.id == session.class_id).first()
+    
+    if not class_obj or class_obj.teacher_id != teacher.id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Bạn không có quyền với phiên này"
+        )
+    
+    # Lấy tất cả records có status = PENDING
+    pending_records = db.query(AttendanceRecord).filter(
+        AttendanceRecord.session_id == session_id,
+        AttendanceRecord.status == AttendanceStatus.PENDING
+    ).all()
+    
+    # Cập nhật tất cả
+    for record in pending_records:
+        record.status = AttendanceStatus.PRESENT
+        existing_notes = record.notes or ""
+        record.notes = f"{existing_notes} | Teacher confirmed (bulk)"
+        record.updated_at = datetime.now(VIETNAM_TZ)
+    
+    db.commit()
+    
+    # Refresh để lấy dữ liệu mới
+    for record in pending_records:
+        db.refresh(record)
+    
+    # Broadcast bulk confirmation
+    await manager.broadcast_to_session(
+        session_id,
+        {
+            "type": "bulk_confirmation",
+            "session_id": session_id,
+            "confirmed_count": len(pending_records),
+            "message": f"Giáo viên đã xác nhận {len(pending_records)} sinh viên"
+        }
+    )
+    
+    return ConfirmAllPendingResponse(
+        success=True,
+        confirmed_count=len(pending_records),
+        records=[
+            AttendanceRecordDetail(
+                id=record.id,
+                session_id=record.session_id,
+                student_id=record.student_id,
+                student_code=record.student.student_code,
+                student_name=record.student.user.full_name,
+                status=record.status,
+                confidence_score=record.confidence_score,
+                recorded_at=record.recorded_at,
+                notes=record.notes
+            )
+            for record in pending_records
+        ]
+    )
 
 

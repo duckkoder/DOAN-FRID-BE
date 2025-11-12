@@ -59,6 +59,7 @@ class EndSessionResponse(BaseModel):
     present_count: int
     absent_count: int
     excused_count: int = Field(default=0, description="Số sinh viên vắng có phép (đã xin nghỉ được duyệt)")
+    pending_count: int = Field(default=0, description="Số sinh viên chờ xác nhận")  # ✅ NEW
     attendance_rate: float  # Chỉ tính present / total
 
 
@@ -164,6 +165,21 @@ class WSSessionStatus(BaseModel):
     session_id: int
     status: str
     message: str
+
+
+# ✅ NEW: WebSocket message cho pending confirmation (Hybrid Approach)
+class WSPendingConfirmation(BaseModel):
+    """WebSocket message khi có sinh viên cần xác nhận (realtime trong phiên)."""
+    type: str = "pending_confirmation"
+    session_id: int
+    record_id: int
+    student_id: int
+    student_code: str
+    full_name: str
+    confidence_score: float
+    recorded_at: datetime
+    image_url: Optional[str] = None  # URL ảnh khuôn mặt được crop (nếu có)
+    message: str = "Sinh viên cần xác nhận điểm danh"
 
 
 # ============= Teacher Confirmation Schemas =============

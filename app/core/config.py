@@ -57,6 +57,14 @@ class Settings(BaseSettings):
     AI_SERVICE_SECRET: str = "shared-secret-key-for-hmac-verification"  # Secret key for HMAC
     AI_WEBSOCKET_TOKEN_EXPIRE_MINUTES: int = 30  # WebSocket token expiry
     
+    # ✅ AI Confidence Threshold cho teacher confirmation
+    AI_CONFIDENCE_THRESHOLD: float = Field(
+        default=0.7,
+        description="Ngưỡng confidence để tự động xác nhận điểm danh. "
+                    "Nếu avg_confidence >= threshold: tự động PRESENT. "
+                    "Nếu < threshold: PENDING (cần giáo viên xác nhận)."
+    )
+    
     # Face Verification Settings
     FACE_VERIFICATION_FPS: int = 10  # Process 10 frames per second
     FACE_VERIFICATION_JPEG_QUALITY: int = 80  # JPEG compression quality (70-90)
