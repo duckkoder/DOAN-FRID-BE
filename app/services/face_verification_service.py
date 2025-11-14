@@ -26,7 +26,7 @@ class FaceVerificationService:
         self.mp_drawing = mp.solutions.drawing_utils
         self.drawing_spec = self.mp_drawing.DrawingSpec(thickness=1, circle_radius=1)
         
-        # 14 verification steps for comprehensive face capture
+        # 11 verification steps for comprehensive face capture
         self.verification_steps = [
             {
                 "name": "face_front",
@@ -35,7 +35,7 @@ class FaceVerificationService:
                 "condition": self.check_front_face,
                 "tolerance": 10
             },
-            # Left face angles (5°, 10°, 15°, 20°)
+            # Left face angles (5°, 10°, 15°)
             {
                 "name": "face_left_5",
                 "instruction": "Turn your face slightly to the left (5°)",
@@ -60,15 +60,7 @@ class FaceVerificationService:
                 "target_angle": 15,
                 "tolerance": 4
             },
-            {
-                "name": "face_left_20",
-                "instruction": "Turn your face further to the left (20°)",
-                "duration": 1.0,
-                "condition": self.check_left_face,
-                "target_angle": 20,
-                "tolerance": 4
-            },
-            # Right face angles (5°, 10°, 15°, 20°)
+            # Right face angles (5°, 10°, 15°)
             {
                 "name": "face_right_5",
                 "instruction": "Turn your face slightly to the right (5°)",
@@ -93,14 +85,6 @@ class FaceVerificationService:
                 "target_angle": 15,
                 "tolerance": 4
             },
-            {
-                "name": "face_right_20",
-                "instruction": "Turn your face further to the right (20°)",
-                "duration": 1.0,
-                "condition": self.check_right_face,
-                "target_angle": 20,
-                "tolerance": 4
-            },
             # Face close
             {
                 "name": "face_close",
@@ -109,7 +93,7 @@ class FaceVerificationService:
                 "condition": self.check_face_close,
                 "tolerance": 5
             },
-            # Face up/down - reduced to 5° and 10°
+            # Face up/down (5° and 10°)
             {
                 "name": "face_up_5",
                 "instruction": "Tilt your face up (5°)",
