@@ -1,5 +1,7 @@
 """Attendance service với AI-Service integration."""
 import logging
+import httpx
+import base64
 from typing import List, Optional
 from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
@@ -370,13 +372,14 @@ class AttendanceService:
                     }
                 )
             
-            # Tạo attendance record
+            # Tạo attendance record (image_path = NULL, sẽ update sau khi end_session)
             new_record = AttendanceRecord(
                 session_id=session.id,
                 student_id=student.id,
                 status=attendance_status,
                 recorded_at=validated_student.validation_passed_at,
                 confidence_score=validated_student.avg_confidence,
+                image_path=None,  # ⚠️ CHƯA CÓ ẢNH, sẽ update sau
                 notes=notes
             )
             
@@ -554,6 +557,14 @@ class AttendanceService:
                         f"based on approved leave request {leave_request.id}"
                     )
         
+        # ✅ GỌI AI SERVICE LẤY ẢNH VÀ UPLOAD LÊN S3
+        if session.ai_session_id:
+            try:
+                await self._fetch_and_upload_face_images(session)
+            except Exception as e:
+                logger.error(f"Failed to fetch and upload face images: {e}")
+                # Continue without images (không block end_session)
+        
         # Cập nhật trạng thái phiên
         session.status = SessionStatus.FINISHED.value
         session.end_time = datetime.now(VIETNAM_TZ)
@@ -646,7 +657,8 @@ class AttendanceService:
                 status=record.status,
                 confidence_score=record.confidence_score,
                 recorded_at=record.recorded_at,
-                notes=record.notes
+                notes=record.notes,
+                image_path=record.image_path
             )
             for record in records
         ]
@@ -783,3 +795,104 @@ class AttendanceService:
             "sessions": session_responses,
             "total": total
         }
+    
+    async def _fetch_and_upload_face_images(self, session: AttendanceSession):
+        """
+        Gọi AI Service lấy face crops và upload lên S3, sau đó update image_path cho records.
+        
+        Args:
+            session: AttendanceSession object
+        """
+        from app.services.file_service import FileService
+        
+        # Lấy teacher_id để làm uploader_id
+        class_obj = self.db.query(Class).filter(Class.id == session.class_id).first()
+        teacher = self.db.query(Teacher).filter(Teacher.id == class_obj.teacher_id).first() if class_obj else None
+        uploader_id = teacher.user_id if teacher else 1  # Fallback to system user
+        
+        # Khởi tạo FileService
+        file_service = FileService(self.db)
+        
+        try:
+            # 1. Gọi AI Service GET /sessions/{ai_session_id}/face-crops
+            ai_service_url = f"{settings.AI_SERVICE_URL}/api/v1/sessions/{session.ai_session_id}/face-crops"
+            
+            async with httpx.AsyncClient(timeout=30.0) as client:
+                response = await client.get(ai_service_url)
+                
+                if response.status_code != 200:
+                    logger.error(f"Failed to fetch face crops from AI Service: {response.status_code}")
+                    return
+                
+                data = response.json()
+                face_crops = data.get("face_crops", [])
+                
+                if not face_crops:
+                    logger.info(f"No face crops available for session {session.id}")
+                    return
+                
+                logger.info(f"Fetched {len(face_crops)} face crops from AI Service")
+                
+                # 2. Upload từng ảnh lên S3 qua FileService và update DB
+                uploaded_count = 0
+                for crop_data in face_crops:
+                    student_code = crop_data.get("student_code")
+                    face_crop_base64 = crop_data.get("face_crop_base64")
+                    
+                    if not student_code or not face_crop_base64:
+                        continue
+                    
+                    try:
+                        # Find student
+                        student = self.db.query(Student).filter(
+                            Student.student_code == student_code
+                        ).first()
+                        
+                        if not student:
+                            logger.warning(f"Student not found: {student_code}")
+                            continue
+                        
+                        # Find attendance record
+                        record = self.db.query(AttendanceRecord).filter(
+                            AttendanceRecord.session_id == session.id,
+                            AttendanceRecord.student_id == student.id
+                        ).first()
+                        
+                        if not record:
+                            logger.warning(f"Attendance record not found for student {student_code}")
+                            continue
+                        
+                        # Upload to S3 via FileService
+                        timestamp_ms = int(datetime.now().timestamp() * 1000)
+                        filename = f"{session.id}/{student_code}_{timestamp_ms}.jpg"
+                        
+                        file_record = await file_service.upload_base64_and_save(
+                            base64_data=face_crop_base64,
+                            filename=filename,
+                            folder="private/attendance-evidence",
+                            uploader_id=uploader_id,
+                            category="attendance_evidence"
+                        )
+                        
+                        # Update attendance record với file_id (để có thể get presigned URL sau)
+                        # Lưu cả S3 URL cho backward compatibility
+                        image_url = file_service.get_file_url(file_record.id)
+                        record.image_path = image_url
+                        
+                        uploaded_count += 1
+                        
+                        logger.info(f"✅ Uploaded face evidence for {student_code}: file_id={file_record.id}")
+                        
+                    except Exception as e:
+                        logger.error(f"Failed to process face crop for {student_code}: {e}")
+                        continue
+                
+                # Commit all updates
+                self.db.commit()
+                
+                logger.info(f"✅ Uploaded {uploaded_count}/{len(face_crops)} face images to S3")
+                
+        except Exception as e:
+            logger.error(f"Error in _fetch_and_upload_face_images: {e}")
+            raise
+

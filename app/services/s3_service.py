@@ -57,7 +57,7 @@ class S3Service:
     async def upload_file(
         self,
         file: UploadFile,
-        folder: Literal["public/avatars", "private/documents", "private/faces"],
+        folder: Literal["public/avatars", "private/documents", "private/faces", "private/attendance-evidence"],
         file_type: Literal["image", "document"] = "image"
     ) -> dict:
         """Upload file to S3."""
@@ -128,6 +128,62 @@ class S3Service:
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                 detail=f"Failed to generate URL: {str(e)}"
+            )
+    
+    async def upload_base64_image(
+        self,
+        base64_data: str,
+        folder: str,
+        filename: str
+    ) -> str:
+        """
+        Upload ảnh từ base64 string lên S3.
+        
+        Args:
+            base64_data: Base64 encoded image (without data:image/jpeg;base64, prefix)
+            folder: Folder trong S3 bucket (e.g., "private/faces")
+            filename: Tên file bao gồm subfolder (e.g., "123/SV001_1705392123.jpg")
+            
+        Returns:
+            S3 URL của file đã upload
+        """
+        import base64
+        from io import BytesIO
+        
+        try:
+            # Decode base64 to bytes
+            image_bytes = base64.b64decode(base64_data)
+            
+            # Create file-like object
+            file_obj = BytesIO(image_bytes)
+            file_obj.seek(0)
+            
+            # Generate S3 key
+            file_key = f"{folder}/{filename}"
+            
+            # Upload to S3
+            self.s3_client.upload_fileobj(
+                file_obj,
+                self.bucket_name,
+                file_key,
+                ExtraArgs={
+                    'ContentType': 'image/jpeg',
+                    'ACL': 'private',
+                    'Metadata': {
+                        'uploaded_at': datetime.utcnow().isoformat(),
+                        'source': 'ai_service_callback'
+                    }
+                }
+            )
+            
+            # Return S3 URL
+            s3_url = f"https://{self.bucket_name}.s3.{settings.AWS_REGION}.amazonaws.com/{file_key}"
+            return s3_url
+            
+        except Exception as e:
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=f"Failed to upload base64 image: {str(e)}"
             )
     
     def batch_generate_presigned_urls(

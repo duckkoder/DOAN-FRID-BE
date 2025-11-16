@@ -115,6 +115,7 @@ class AttendanceRecordDetail(BaseModel):
     confidence_score: Optional[float]
     recorded_at: Optional[datetime]
     notes: Optional[str]
+    image_path: Optional[str] = Field(None, description="Presigned URL của ảnh khuôn mặt (evidence)")
     
     class Config:
         from_attributes = True

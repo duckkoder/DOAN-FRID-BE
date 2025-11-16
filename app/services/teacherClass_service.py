@@ -666,13 +666,7 @@ class TeacherClassService:
                 verified_count += 1
             
             # Get avatar URL if exists
-            avatar_url = None
-            if user_info.avatar_url:
-                try:
-                    file_service = FileService(db)
-                    avatar_url = file_service.get_file_url(user_info.avatar_url)
-                except Exception as e:
-                    print(f"Warning: Failed to get avatar URL for user {user_info.id}: {str(e)}")
+            avatar_url = user_info.avatar_url
             
             students_data.append({
                 "id": student.id,
