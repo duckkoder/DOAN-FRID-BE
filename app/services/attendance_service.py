@@ -439,7 +439,8 @@ class AttendanceService:
         self,
         current_user: User,
         session_id: int,
-        request
+        request,
+        skip_image_upload: bool = False
     ):
         """
         Kết thúc phiên điểm danh.
@@ -449,6 +450,9 @@ class AttendanceService:
         2. Cập nhật status = "finished"
         3. Tự động đánh dấu absent nếu cần
         4. Trả về thống kê
+        
+        Args:
+            skip_image_upload: Nếu True, bỏ qua việc upload ảnh (để chạy ở background task)
         """
         from app.schemas.attendance import EndSessionResponse
         
@@ -557,8 +561,9 @@ class AttendanceService:
                         f"based on approved leave request {leave_request.id}"
                     )
         
-        # ✅ GỌI AI SERVICE LẤY ẢNH VÀ UPLOAD LÊN S3
-        if session.ai_session_id:
+        # ✅ GỌI AI SERVICE LẤY ẢNH VÀ UPLOAD LÊN S3 (CHỈ NẾU KHÔNG SKIP)
+        # Nếu skip_image_upload=True, việc upload sẽ được thực hiện ở background task
+        if not skip_image_upload and session.ai_session_id:
             try:
                 await self._fetch_and_upload_face_images(session)
             except Exception as e:
@@ -817,7 +822,14 @@ class AttendanceService:
             # 1. Gọi AI Service GET /sessions/{ai_session_id}/face-crops
             ai_service_url = f"{settings.AI_SERVICE_URL}/api/v1/sessions/{session.ai_session_id}/face-crops"
             
-            async with httpx.AsyncClient(timeout=30.0) as client:
+            # Tăng timeout dựa trên số lượng sinh viên dự kiến (2s per student)
+            # Tối thiểu 60s, tối đa 300s (5 phút)
+            class_members_count = self.db.query(ClassMember).filter(
+                ClassMember.class_id == session.class_id
+            ).count()
+            estimated_timeout = max(60, min(class_members_count * 2 + 30, 300))
+            
+            async with httpx.AsyncClient(timeout=estimated_timeout) as client:
                 response = await client.get(ai_service_url)
                 
                 if response.status_code != 200:
@@ -835,6 +847,8 @@ class AttendanceService:
                 
                 # 2. Upload từng ảnh lên S3 qua FileService và update DB
                 uploaded_count = 0
+                skipped_count = 0
+                
                 for crop_data in face_crops:
                     student_code = crop_data.get("student_code")
                     face_crop_base64 = crop_data.get("face_crop_base64")
@@ -862,6 +876,12 @@ class AttendanceService:
                             logger.warning(f"Attendance record not found for student {student_code}")
                             continue
                         
+                        # ✅ Idempotency check: Skip nếu đã có ảnh
+                        if record.image_path:
+                            logger.info(f"Image already uploaded for {student_code}, skipping")
+                            skipped_count += 1
+                            continue
+                        
                         # Upload to S3 via FileService
                         timestamp_ms = int(datetime.now().timestamp() * 1000)
                         filename = f"{session.id}/{student_code}_{timestamp_ms}.jpg"
@@ -879,18 +899,20 @@ class AttendanceService:
                         image_url = file_service.get_file_url(file_record.id)
                         record.image_path = image_url
                         
+                        # ✅ Commit ngay sau mỗi record để tránh mất dữ liệu
+                        self.db.commit()
+                        
                         uploaded_count += 1
                         
                         logger.info(f"✅ Uploaded face evidence for {student_code}: file_id={file_record.id}")
                         
                     except Exception as e:
                         logger.error(f"Failed to process face crop for {student_code}: {e}")
+                        # Rollback transaction hiện tại nếu có lỗi
+                        self.db.rollback()
                         continue
                 
-                # Commit all updates
-                self.db.commit()
-                
-                logger.info(f"✅ Uploaded {uploaded_count}/{len(face_crops)} face images to S3")
+                logger.info(f"✅ Uploaded {uploaded_count}/{len(face_crops)} face images to S3 (skipped: {skipped_count})")
                 
         except Exception as e:
             logger.error(f"Error in _fetch_and_upload_face_images: {e}")

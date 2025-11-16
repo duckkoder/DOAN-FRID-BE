@@ -84,6 +84,54 @@ class ConnectionManager:
 # Global connection manager
 manager = ConnectionManager()
 
+# Global set để giữ reference của background tasks (tránh bị garbage collected)
+background_tasks_set = set()
+
+
+# ============= Background Task Helper =============
+
+async def upload_images_background_task(session_id: int, ai_session_id: str):
+    """
+    Background task để upload ảnh điểm danh từ AI Service lên S3.
+    Chạy sau khi API đã trả về response để không block UI.
+    """
+    import logging
+    import sys
+    from app.core.database import SessionLocal
+    from app.services.attendance_service import AttendanceService
+    
+    # Configure logger với handler để đảm bảo output được hiển thị
+    logger = logging.getLogger(__name__)
+    logger.setLevel(logging.INFO)
+    if not logger.handlers:
+        handler = logging.StreamHandler(sys.stdout)
+        handler.setLevel(logging.INFO)
+        formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+        handler.setFormatter(formatter)
+        logger.addHandler(handler)
+    
+    db = SessionLocal()
+    try:
+        service = AttendanceService(db)
+        session = db.query(AttendanceSession).filter(
+            AttendanceSession.id == session_id
+        ).first()
+        
+        if session:
+            logger.info(f"Background: Starting image upload for session {session_id}")
+            await service._fetch_and_upload_face_images(session)
+            logger.info(f"Background: Completed image upload for session {session_id}")
+        else:
+            logger.warning(f"Background: Session {session_id} not found")
+            
+    except Exception as e:
+        error_msg = f"Background: Failed to upload images for session {session_id}: {e}"
+        logger.error(error_msg)
+        import traceback
+        traceback.print_exc()
+    finally:
+        db.close()
+
 
 # ============= REST API Endpoints =============
 
@@ -128,10 +176,30 @@ async def end_attendance_session(
     Kết thúc phiên điểm danh.
     
     - Tự động đánh dấu vắng cho sinh viên chưa điểm danh (nếu mark_absent=True)
-    - Trả về thống kê điểm danh
+    - Upload ảnh được thực hiện ở background (không block UI)
+    - Trả về thống kê điểm danh ngay lập tức
     """
+    import asyncio
+    
     service = AttendanceService(db)
-    result = await service.end_session(current_user, session_id, request)
+    # Skip image upload trong end_session, sẽ chạy ở background
+    result = await service.end_session(current_user, session_id, request, skip_image_upload=True)
+    
+    # Schedule upload ảnh ở background task (không block response)
+    # Dùng asyncio.create_task() để chạy trong background
+    if result.session.ai_session_id:
+        print(f"Scheduling background image upload for session {session_id}, ai_session_id={result.session.ai_session_id}")
+        task = asyncio.create_task(
+            upload_images_background_task(
+                session_id=session_id,
+                ai_session_id=result.session.ai_session_id
+            )
+        )
+        # Giữ reference để task không bị garbage collected
+        background_tasks_set.add(task)
+        # Remove task khỏi set khi hoàn thành
+        task.add_done_callback(background_tasks_set.discard)
+        print(f"Background task created and tracked: {task}")
     
     # Broadcast thông báo phiên kết thúc
     await manager.broadcast_to_session(
