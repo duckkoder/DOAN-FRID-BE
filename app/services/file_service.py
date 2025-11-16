@@ -16,7 +16,7 @@ class FileService:
     async def upload_and_save(
         self,
         file: UploadFile,
-        folder: Literal["public/avatars", "private/documents", "private/faces"],
+        folder: Literal["public/avatars", "private/documents", "private/faces", "private/attendance-evidence"],
         uploader_id: int,
         category: str,
         file_type: Literal["image", "document"] = "image"
@@ -36,6 +36,60 @@ class FileService:
             size=s3_result["file_size"],
             category=category,
             is_public=s3_result["is_public"]
+        )
+        
+        self.db.add(file_record)
+        self.db.commit()
+        self.db.refresh(file_record)
+        
+        return file_record
+    
+    async def upload_base64_and_save(
+        self,
+        base64_data: str,
+        filename: str,
+        folder: Literal["public/avatars", "private/documents", "private/faces", "private/attendance-evidence"],
+        uploader_id: int,
+        category: str
+    ) -> File:
+        """
+        Upload ảnh từ base64 string lên S3 và lưu vào database.
+        
+        Args:
+            base64_data: Base64 encoded image (without data:image/jpeg;base64, prefix)
+            filename: Tên file bao gồm subfolder (e.g., "123/SV001_1705392123.jpg")
+            folder: Folder trong S3 bucket
+            uploader_id: ID của user upload (teacher_id hoặc system)
+            category: Category của file (e.g., "attendance_evidence")
+            
+        Returns:
+            File record đã lưu trong DB
+        """
+        # Upload to S3
+        s3_url = await s3_service.upload_base64_image(
+            base64_data=base64_data,
+            folder=folder,
+            filename=filename
+        )
+        
+        # Generate file_key
+        file_key = f"{folder}/{filename}"
+        
+        # Decode base64 to get file size
+        import base64
+        image_bytes = base64.b64decode(base64_data)
+        file_size = len(image_bytes)
+        
+        # Save to DB
+        file_record = File(
+            uploader_id=uploader_id,
+            file_key=file_key,
+            filename=filename.split('/')[-1],  # Chỉ lấy tên file cuối
+            original_name=filename.split('/')[-1],
+            mime_type="image/jpeg",
+            size=file_size,
+            category=category,
+            is_public=False  # Attendance evidence luôn private
         )
         
         self.db.add(file_record)
