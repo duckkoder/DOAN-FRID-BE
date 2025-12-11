@@ -37,10 +37,24 @@ class PoseAngles(BaseModel):
     roll: float = Field(..., description="Rotation in degrees")
 
 
+class BoundingBox(BaseModel):
+    """Face bounding box coordinates (normalized 0-1)."""
+    x: float = Field(..., description="Top-left X coordinate (normalized)")
+    y: float = Field(..., description="Top-left Y coordinate (normalized)")
+    width: float = Field(..., description="Width (normalized)")
+    height: float = Field(..., description="Height (normalized)")
+
+
+class FaceLandmark(BaseModel):
+    """Single face landmark point (normalized 0-1)."""
+    x: float = Field(..., description="X coordinate (normalized)")
+    y: float = Field(..., description="Y coordinate (normalized)")
+    z: float = Field(..., description="Z coordinate (depth, normalized)")
+
+
 class WSProcessedFrameResponse(BaseModel):
-    """Response with processed frame and status."""
+    """Response with face metadata (NO processed image - client draws on raw video)."""
     type: Literal["processed_frame"] = "processed_frame"
-    image: str = Field(..., description="Base64 encoded processed image with annotations")
     instruction: str = Field(..., description="Current instruction for user")
     current_step: int = Field(..., description="Current step number (0-indexed)")
     total_steps: int = Field(..., description="Total number of verification steps")
@@ -51,6 +65,8 @@ class WSProcessedFrameResponse(BaseModel):
     condition_met: bool = Field(..., description="Whether current pose condition is met")
     face_detected: bool = Field(..., description="Whether face is detected in frame")
     pose_angles: Optional[PoseAngles] = Field(None, description="Current face pose angles")
+    bounding_box: Optional[BoundingBox] = Field(None, description="Face bounding box (normalized coordinates)")
+    landmarks: Optional[List[FaceLandmark]] = Field(None, description="Face mesh landmarks (468 points, normalized)")
 
 
 class CropInfo(BaseModel):

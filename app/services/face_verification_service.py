@@ -354,10 +354,11 @@ class FaceVerificationService:
     def process_frame(self, frame: np.ndarray) -> Dict[str, Any]:
         """
         Process a single frame for face verification.
+        NEW ARCHITECTURE: Return metadata only (no processed image).
+        Client will draw bounding box and overlays on raw video stream.
         
         Returns:
             Dict containing:
-                - processed_frame: annotated frame (base64)
                 - current_step: current step number
                 - total_steps: total number of steps
                 - instruction: current instruction text
@@ -365,24 +366,26 @@ class FaceVerificationService:
                 - progress: step progress (0-1)
                 - face_detected: whether face is detected
                 - pose_angles: dict with pitch, yaw, roll
+                - bounding_box: dict with normalized x, y, width, height (0-1)
+                - landmarks: list of 468 normalized (x, y, z) landmark points
                 - should_capture: whether this frame should be captured
                 - capture_data: captured image data if should_capture=True
         """
-        # Mirror frame
+        # NO FLIP - keep original frame for processing
+        # Client handles display mirroring if needed
         clean_image = frame.copy()
-        frame = cv2.flip(frame, 1)
-        clean_image = cv2.flip(clean_image, 1)
         
         # Process with MediaPipe
         image_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
         image_rgb.flags.writeable = False
         results = self.face_mesh.process(image_rgb)
         image_rgb.flags.writeable = True
-        frame = cv2.cvtColor(image_rgb, cv2.COLOR_RGB2BGR)
         
-        # Initialize result
+        # Get frame dimensions for normalization
+        img_h, img_w = frame.shape[:2]
+        
+        # Initialize result (NO processed_frame)
         result = {
-            "processed_frame": "",
             "current_step": self.current_step,
             "total_steps": len(self.verification_steps),
             "instruction": "",
@@ -390,38 +393,51 @@ class FaceVerificationService:
             "progress": 0.0,
             "face_detected": False,
             "pose_angles": {"pitch": 0.0, "yaw": 0.0, "roll": 0.0},
+            "bounding_box": None,
+            "landmarks": None,
             "should_capture": False,
             "capture_data": None
         }
         
         if not results.multi_face_landmarks:
-            cv2.putText(frame, "No face detected", (20, 50), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 0, 255), 2)
-            result["processed_frame"] = self.encode_frame_to_base64(frame)
+            result["instruction"] = "No face detected"
             return result
         
         # Face detected
         result["face_detected"] = True
         face_landmarks = results.multi_face_landmarks[0]
-        img_h, img_w = frame.shape[:2]
         
         # Get pose estimation
         x, y, z = self.get_pose_estimation(frame, face_landmarks)
         result["pose_angles"] = {"pitch": round(x, 2), "yaw": round(y, 2), "roll": round(z, 2)}
         
-        # Get face bounding box
+        # Get face bounding box (pixel coordinates)
         face_x, face_y, face_width, face_height = self.get_face_bounding_box(face_landmarks, img_w, img_h)
         self.face_width_history.append(face_width)
         if len(self.face_width_history) > 10:
             self.face_width_history.pop(0)
         
-        # Draw face rectangle
-        cv2.rectangle(frame, (face_x, face_y), (face_x + face_width, face_y + face_height), (255, 0, 0), 2)
+        # Convert bounding box to normalized coordinates (0-1)
+        result["bounding_box"] = {
+            "x": face_x / img_w,
+            "y": face_y / img_h,
+            "width": face_width / img_w,
+            "height": face_height / img_h
+        }
+        
+        # Extract normalized landmarks (468 points with x, y, z)
+        result["landmarks"] = [
+            {
+                "x": lm.x,
+                "y": lm.y,
+                "z": lm.z
+            }
+            for lm in face_landmarks.landmark
+        ]
         
         # Check if verification is completed
         if self.is_completed():
-            cv2.putText(frame, "VERIFICATION COMPLETED!", (50, 200), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 3)
             result["instruction"] = "Verification completed!"
-            result["processed_frame"] = self.encode_frame_to_base64(frame)
             return result
         
         # Process current step
@@ -440,7 +456,7 @@ class FaceVerificationService:
             progress = min(elapsed / step_info["duration"], 1.0)
             result["progress"] = progress
             
-            self.draw_progress_bar(frame, progress)
+            # NO DRAWING on frame - client will draw progress bar
             
             # Check if duration is met
             if elapsed >= step_info["duration"]:
@@ -477,31 +493,14 @@ class FaceVerificationService:
                     
                     logger.info(f"Step {self.current_step + 1} captured: {step_info['name']}")
                 
-                # Trigger flash and move to next step
-                self.trigger_flash()
+                # Move to next step (NO flash effect - client handles visual feedback)
                 self.current_step += 1
                 self.step_start_time = None
         else:
             self.step_start_time = None
         
-        # Draw UI
-        cv2.putText(frame, step_info["instruction"], (20, 50), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 255, 0), 2)
-        cv2.putText(frame, f"Step {self.current_step + 1}/{len(self.verification_steps)}", (20, 80), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 2)
-        
-        status_color = (0, 255, 0) if condition_met else (0, 165, 255)
-        status_text = "CORRECT POSE" if condition_met else "ADJUST POSE"
-        cv2.putText(frame, status_text, (20, 140), cv2.FONT_HERSHEY_SIMPLEX, 0.6, status_color, 2)
-        
-        # Show pose angles
-        cv2.putText(frame, f"Pitch: {x:.1f}°", (500, 50), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 255), 2)
-        cv2.putText(frame, f"Yaw: {y:.1f}°", (500, 80), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 255), 2)
-        cv2.putText(frame, f"Width: {face_width}px", (500, 110), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 255), 2)
-        
-        # Apply flash effect
-        frame = self.create_flash_effect(frame)
-        
-        # Encode processed frame
-        result["processed_frame"] = self.encode_frame_to_base64(frame)
+        # NO UI DRAWING - all visual feedback handled by client
+        # Client will draw: instruction, step counter, status, pose angles, progress bar
         
         return result
     

@@ -187,9 +187,8 @@ class FaceRegistrationWebSocketHandler:
             else:
                 ws_status = "waiting_for_pose"
             
-            # Send processed frame response
+            # Send processed frame response (metadata only, NO image)
             response = WSProcessedFrameResponse(
-                image=result["processed_frame"],
                 instruction=result["instruction"],
                 current_step=result["current_step"],
                 total_steps=result["total_steps"],
@@ -197,7 +196,9 @@ class FaceRegistrationWebSocketHandler:
                 status=ws_status,
                 condition_met=result["condition_met"],
                 face_detected=result["face_detected"],
-                pose_angles=PoseAngles(**result["pose_angles"]) if result["face_detected"] else None
+                pose_angles=PoseAngles(**result["pose_angles"]) if result["face_detected"] else None,
+                bounding_box=result["bounding_box"],
+                landmarks=result["landmarks"]
             )
             
             await self.websocket.send_json(response.model_dump(mode='json'))
