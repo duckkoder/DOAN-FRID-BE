@@ -1,0 +1,81 @@
+version: '3.8'
+
+services:
+  # 1. Database
+  db:
+    image: postgres:15-alpine
+    restart: always
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    environment:
+      - POSTGRES_USER=${POSTGRES_USER:-postgres}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-password}
+      - POSTGRES_DB=${POSTGRES_DB:-pbl6_db}
+    networks:
+      - app-network
+
+  # 2. Backend API
+  backend:
+    build: 
+      context: .
+      dockerfile: Dockerfile
+    restart: always
+    command: uvicorn main:app --host 0.0.0.0 --port 8000
+    # Mở port 8000 ra ngoài để test trực tiếp
+    ports:
+      - "8000:8000"
+    depends_on:
+      - db
+      # - ai-service # Tạm thời tắt dependency này
+    env_file:
+      - .env
+    environment:
+      - DATABASE_URL=postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-password}@db:5432/${POSTGRES_DB:-pbl6_db}
+      # - AI_SERVICE_URL=http://ai-service:8000
+    networks:
+      - app-network
+
+  # 3. AI Service (Tạm tắt)
+  # ai-service:
+  #   build:
+  #     context: ../AI-service
+  #     dockerfile: docker/Dockerfile
+  #   restart: always
+  #   volumes:
+  #     - ../AI-service/models:/app/models
+  #   deploy:
+  #     resources:
+  #       limits:
+  #         memory: 4G
+  #   networks:
+  #     - app-network
+
+  # 4. Frontend (Tạm tắt)
+  # frontend:
+  #   build:
+  #     context: ../front-end
+  #     dockerfile: Dockerfile
+  #   restart: always
+  #   networks:
+  #     - app-network
+
+  # 5. Nginx Gateway (Tạm tắt)
+  # nginx:
+  #   image: nginx:alpine
+  #   restart: always
+  #   ports:
+  #     - "80:80"
+  #   volumes:
+  #     - ./nginx/default.conf:/etc/nginx/conf.d/default.conf
+  #   depends_on:
+  #     - backend
+  #     - frontend
+  #   networks:
+  #     - app-network
+
+volumes:
+  postgres_data:
+
+networks:
+  app-network:
+    driver: bridge
