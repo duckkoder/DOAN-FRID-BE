@@ -18,5 +18,5 @@ COPY . .
 # Thay 8000 bằng cổng mà ứng dụng của bạn chạy
 EXPOSE 8000
 
-# 6. Lệnh để chạy ứng dụng (Xem phần quan trọng bên dưới)
-CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000"]
+# 6. Lệnh để chạy ứng dụng (Sửa lại đường dẫn module: app.main)
+CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
