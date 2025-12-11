@@ -20,7 +20,9 @@ services:
       context: .
       dockerfile: Dockerfile
     restart: always
-    command: uvicorn main:app --host 0.0.0.0 --port 8000
+    # command: uvicorn main:app --host 0.0.0.0 --port 8000 # <-- Xóa dòng này để dùng CMD trong Dockerfile
+    # Hoặc sửa thành:
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8000
     # Mở port 8000 ra ngoài để test trực tiếp
     ports:
       - "8000:8000"
