@@ -1,28 +1,17 @@
-version: '3.8'
-
 services:
-  # 1. Database -> ĐÃ XÓA VÌ DÙNG CLOUD DB
-  
-  # 2. Backend API
+  # Backend API
   backend:
     build: 
       context: .
       dockerfile: Dockerfile
     restart: always
-    # command: uvicorn app.main:app --host 0.0.0.0 --port 8000 (Dùng CMD trong Dockerfile là đủ)
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8000
     ports:
       - "8000:8000"
-    # depends_on:  -> XÓA VÌ KHÔNG CÒN SERVICE DB LOCAL
-    #   - db
     env_file:
       - .env
-    # environment: -> XÓA VÌ ĐÃ CÓ TRONG FILE .ENV
-    #   - DATABASE_URL=... 
     networks:
       - app-network
-
-# volumes: -> XÓA VÌ KHÔNG CẦN LƯU DATA POSTGRES NỮA
-#   postgres_data:
 
 networks:
   app-network:
