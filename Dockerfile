@@ -5,6 +5,12 @@ FROM python:3.12-slim
 # 2. Đặt thư mục làm việc bên trong container
 WORKDIR /app
 
+# 2.1 Cài system deps tối thiểu (tránh lỗi OpenCV/libGL trên slim)
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    libgl1 \
+    libglib2.0-0 \
+  && rm -rf /var/lib/apt/lists/*
+
 # 3. Cập nhật pip và cài đặt thư viện
 # Copy file requirements trước để tận dụng cache của Docker
 COPY requirements.txt .
