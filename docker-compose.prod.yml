@@ -1,15 +1,40 @@
 services:
-  # Backend API
+  # Backend API (kết nối Cloud DB qua DATABASE_URL trong .env)
   backend:
-    build: 
+    build:
       context: .
       dockerfile: Dockerfile
     restart: always
     command: uvicorn app.main:app --host 0.0.0.0 --port 8000
-    ports:
-      - "8000:8000"
     env_file:
       - .env
+    expose:
+      - "8000"
+    networks:
+      - app-network
+
+  # Frontend (repo riêng, nằm cùng cấp với back-end trên server)
+  frontend:
+    build:
+      context: ../front-end
+      dockerfile: Dockerfile
+    restart: always
+    expose:
+      - "80"
+    networks:
+      - app-network
+
+  # Nginx gateway: / -> frontend, /api/v1 -> backend
+  nginx:
+    image: nginx:alpine
+    restart: always
+    ports:
+      - "80:80"
+    volumes:
+      - ./nginx/default.conf:/etc/nginx/conf.d/default.conf:ro
+    depends_on:
+      - backend
+      - frontend
     networks:
       - app-network
 
