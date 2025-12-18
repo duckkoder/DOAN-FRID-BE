@@ -47,6 +47,19 @@ class StartSessionWithAIResponse(BaseModel):
     status: str = Field(..., description="Status của session")
 
 
+class ResumeSessionResponse(BaseModel):
+    """Response khi resume session đang ongoing."""
+    session_id: int = Field(..., description="Backend session ID")
+    ai_session_id: str = Field(..., description="AI Service session ID")
+    ai_ws_url: str = Field(..., description="WebSocket URL cho AI Service")
+    ai_ws_token: str = Field(..., description="JWT token mới cho WebSocket authentication")
+    expires_at: datetime = Field(..., description="Thời gian hết hạn của token mới")
+    status: str = Field(..., description="Status của session")
+    session_name: Optional[str] = Field(None, description="Tên phiên điểm danh")
+    start_time: datetime = Field(..., description="Thời gian bắt đầu session")
+    class_id: int = Field(..., description="ID của lớp học")
+
+
 class EndSessionRequest(BaseModel):
     """Request kết thúc phiên điểm danh."""
     mark_absent: bool = Field(default=True, description="Tự động đánh dấu vắng cho sinh viên chưa điểm danh")
