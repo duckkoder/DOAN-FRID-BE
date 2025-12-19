@@ -26,6 +26,7 @@ from app.services.ai_service_client import ai_service_client
 from app.schemas.attendance import (
     StartSessionRequest,
     StartSessionWithAIResponse,
+    ResumeSessionResponse,
     AICallbackPayload,
     AICallbackResponse,
     AIValidatedStudent
@@ -230,6 +231,159 @@ class AttendanceService:
             ai_ws_token=ws_token,
             expires_at=expires_at,
             status=new_session.status
+        )
+    
+    async def resume_session(
+        self,
+        current_user: User,
+        session_id: int
+    ) -> ResumeSessionResponse:
+        """
+        Resume một phiên điểm danh đang ongoing sau khi refresh page.
+        
+        Tạo token WebSocket mới để kết nối lại với AI-Service.
+        Nếu AI-Service session đã bị mất (restart/timeout), báo lỗi yêu cầu kết thúc phiên.
+        
+        Args:
+            current_user: User hiện tại (phải là teacher của lớp)
+            session_id: ID của session cần resume
+            
+        Returns:
+            ResumeSessionResponse với thông tin WebSocket mới
+            
+        Raises:
+            HTTPException: Nếu session không tồn tại, không ongoing, AI session đã mất, hoặc không có quyền
+        """
+        # 1. Kiểm tra role
+        if current_user.role != UserRole.TEACHER:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Chỉ giáo viên mới có thể resume phiên điểm danh"
+            )
+        
+        # 2. Lấy thông tin giáo viên
+        teacher = self.db.query(Teacher).filter(
+            Teacher.user_id == current_user.id
+        ).first()
+        if not teacher:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Không tìm thấy thông tin giáo viên"
+            )
+        
+        # 3. Lấy session
+        session = self.db.query(AttendanceSession).filter(
+            AttendanceSession.id == session_id
+        ).first()
+        
+        if not session:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Không tìm thấy phiên điểm danh"
+            )
+        
+        # 4. Kiểm tra session đang ongoing
+        if session.status != SessionStatus.ONGOING.value:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Phiên điểm danh không ở trạng thái đang diễn ra (status: {session.status})"
+            )
+        
+        # 5. Kiểm tra quyền - lớp phải thuộc về giáo viên này
+        class_obj = self.db.query(Class).filter(
+            Class.id == session.class_id
+        ).first()
+        
+        if not class_obj or class_obj.teacher_id != teacher.id:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Bạn không có quyền với phiên điểm danh này"
+            )
+        
+        # 6. Kiểm tra AI-Service session còn tồn tại không
+        ai_session_id = session.ai_session_id
+        
+        if not ai_session_id:
+            raise HTTPException(
+                status_code=status.HTTP_410_GONE,
+                detail="Phiên điểm danh không có kết nối AI. Vui lòng kết thúc phiên này và tạo phiên điểm danh mới."
+            )
+        
+        # Kiểm tra AI session còn active không
+        try:
+            ai_status = await ai_service_client.get_session_status(ai_session_id)
+            if ai_status.get("status") != "active":
+                logger.warning(
+                    f"AI session not active",
+                    extra={
+                        "session_id": session.id,
+                        "ai_session_id": ai_session_id,
+                        "ai_status": ai_status.get("status")
+                    }
+                )
+                raise HTTPException(
+                    status_code=status.HTTP_410_GONE,
+                    detail="Kết nối AI đã hết hạn hoặc không còn hoạt động. Vui lòng kết thúc phiên này và tạo phiên điểm danh mới."
+                )
+        except HTTPException:
+            # Re-raise HTTP exceptions
+            raise
+        except Exception as e:
+            logger.warning(
+                f"AI session not found or expired",
+                extra={
+                    "session_id": session.id,
+                    "ai_session_id": ai_session_id,
+                    "error": str(e)
+                }
+            )
+            raise HTTPException(
+                status_code=status.HTTP_410_GONE,
+                detail="Kết nối AI đã mất (có thể do hệ thống khởi động lại). Vui lòng kết thúc phiên này và tạo phiên điểm danh mới."
+            )
+        
+        logger.info(
+            f"AI session still active, proceeding with resume",
+            extra={
+                "session_id": session.id,
+                "ai_session_id": ai_session_id
+            }
+        )
+        
+        # 7. Generate JWT token mới cho WebSocket
+        token_expires = timedelta(minutes=settings.AI_WEBSOCKET_TOKEN_EXPIRE_MINUTES)
+        ws_token = create_websocket_token(
+            user_id=current_user.id,
+            session_id=session.id,
+            role=current_user.role,
+            expires_delta=token_expires
+        )
+        
+        # 8. Build WebSocket URL
+        ai_ws_base = settings.AI_SERVICE_URL.replace("http://", "ws://").replace("https://", "wss://")
+        ai_ws_url = f"{ai_ws_base}/api/v1/sessions/{ai_session_id}/stream"
+        
+        expires_at = datetime.now(VIETNAM_TZ) + token_expires
+        
+        logger.info(
+            f"Session resumed",
+            extra={
+                "session_id": session.id,
+                "ai_session_id": ai_session_id,
+                "teacher_id": teacher.id
+            }
+        )
+        
+        return ResumeSessionResponse(
+            session_id=session.id,
+            ai_session_id=ai_session_id,
+            ai_ws_url=ai_ws_url,
+            ai_ws_token=ws_token,
+            expires_at=expires_at,
+            status=session.status,
+            session_name=session.session_name,
+            start_time=session.start_time,
+            class_id=session.class_id
         )
     
     async def handle_ai_callback(

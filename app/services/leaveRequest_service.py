@@ -18,6 +18,7 @@ from app.schemas.leaveRequest import (
 )
 from app.services.file_service import FileService
 from app.core.exceptions import ValidationError  # Import custom ValidationError
+from app.utils.datetime_helper import format_datetime_iso, format_datetime_iso_optional
 
 
 class LeaveRequestService:
@@ -168,11 +169,11 @@ class LeaveRequestService:
                     "classId": cls.id,
                     "className": cls.class_name,
                     "reason": leave_request.reason,
-                    "leaveDate": leave_request.leave_date.isoformat() + "Z",
+                    "leaveDate": format_datetime_iso(leave_request.leave_date),
                     "dayOfWeek": leave_request.day_of_week,
                     "timeSlot": leave_request.time_slot,
                     "status": leave_request.status,
-                    "createdAt": leave_request.created_at.isoformat() + "Z"
+                    "createdAt": format_datetime_iso(leave_request.created_at)
                 }
             },
             "message": "Leave request created successfully"
@@ -267,7 +268,7 @@ class LeaveRequestService:
                 "classId": req.class_id,
                 "className": cls.class_name if cls else "Unknown",
                 "reason": req.reason,
-                "leaveDate": req.leave_date.isoformat() + "Z",
+                "leaveDate": format_datetime_iso(req.leave_date),
                 "dayOfWeek": req.day_of_week,
                 "timeSlot": req.time_slot,
                 "evidenceFileId": req.evidence_file_id,
@@ -276,9 +277,9 @@ class LeaveRequestService:
                 "reviewedBy": req.reviewed_by,
                 "reviewerName": reviewer_name,
                 "reviewNotes": req.review_notes,
-                "reviewedAt": req.reviewed_at.isoformat() + "Z" if req.reviewed_at else None,
-                "createdAt": req.created_at.isoformat() + "Z",
-                "updatedAt": req.updated_at.isoformat() + "Z" if req.updated_at else None
+                "reviewedAt": format_datetime_iso_optional(req.reviewed_at),
+                "createdAt": format_datetime_iso(req.created_at),
+                "updatedAt": format_datetime_iso_optional(req.updated_at)
             })
         
         return {
@@ -361,7 +362,7 @@ class LeaveRequestService:
                     "classId": leave_request.class_id,
                     "className": cls.class_name if cls else "Unknown",
                     "reason": leave_request.reason,
-                    "leaveDate": leave_request.leave_date.isoformat() + "Z",
+                    "leaveDate": format_datetime_iso(leave_request.leave_date),
                     "dayOfWeek": leave_request.day_of_week,
                     "timeSlot": leave_request.time_slot,
                     "evidenceFileId": leave_request.evidence_file_id,
@@ -370,9 +371,9 @@ class LeaveRequestService:
                     "reviewedBy": leave_request.reviewed_by,
                     "reviewerName": reviewer_name,
                     "reviewNotes": leave_request.review_notes,
-                    "reviewedAt": leave_request.reviewed_at.isoformat() + "Z" if leave_request.reviewed_at else None,
-                    "createdAt": leave_request.created_at.isoformat() + "Z",
-                    "updatedAt": leave_request.updated_at.isoformat() + "Z" if leave_request.updated_at else None
+                    "reviewedAt": format_datetime_iso_optional(leave_request.reviewed_at),
+                    "createdAt": format_datetime_iso(leave_request.created_at),
+                    "updatedAt": format_datetime_iso_optional(leave_request.updated_at)
                 }
             }
         }
@@ -530,7 +531,7 @@ class LeaveRequestService:
             "data": {
                 "leaveRequest": {
                     "id": leave_request.id,
-                    "updatedAt": leave_request.updated_at.isoformat() + "Z"
+                    "updatedAt": format_datetime_iso(leave_request.updated_at)
                 }
             },
             "message": "Leave request updated successfully"
@@ -594,7 +595,7 @@ class LeaveRequestService:
                 "leaveRequest": {
                     "id": leave_request.id,
                     "status": leave_request.status,
-                    "reviewedAt": leave_request.reviewed_at.isoformat() + "Z"
+                    "reviewedAt": format_datetime_iso(leave_request.reviewed_at)
                 }
             },
             "message": f"Leave request {payload.status} successfully"
@@ -767,7 +768,7 @@ class LeaveRequestService:
                 "classId": req.class_id,
                 "className": cls.class_name if cls else "Unknown",
                 "reason": req.reason,
-                "leaveDate": req.leave_date.isoformat() + "Z",
+                "leaveDate": format_datetime_iso(req.leave_date),
                 "dayOfWeek": req.day_of_week,
                 "timeSlot": req.time_slot,
                 "evidenceFileId": req.evidence_file_id,
@@ -776,9 +777,9 @@ class LeaveRequestService:
                 "reviewedBy": req.reviewed_by,
                 "reviewerName": reviewer_name,
                 "reviewNotes": req.review_notes,
-                "reviewedAt": req.reviewed_at.isoformat() + "Z" if req.reviewed_at else None,
-                "createdAt": req.created_at.isoformat() + "Z",
-                "updatedAt": req.updated_at.isoformat() + "Z" if req.updated_at else None
+                "reviewedAt": format_datetime_iso_optional(req.reviewed_at),
+                "createdAt": format_datetime_iso(req.created_at),
+                "updatedAt": format_datetime_iso_optional(req.updated_at)
             })
         
         return {

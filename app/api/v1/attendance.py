@@ -21,6 +21,7 @@ from app.schemas.attendance import (
     WSSessionStatus,
     WSStudentAttendanceUpdate,
     StartSessionWithAIResponse,
+    ResumeSessionResponse,
     AICallbackPayload,
     AICallbackResponse,
     PendingStudentsResponse,
@@ -163,6 +164,41 @@ async def start_attendance_session(
     """
     service = AttendanceService(db)
     return await service.start_session_with_ai(current_user, request)
+
+
+@router.post("/sessions/{session_id}/resume", response_model=ResumeSessionResponse)
+async def resume_attendance_session(
+    session_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """
+    Resume phiên điểm danh đang ongoing sau khi refresh page.
+    
+    **Use case:**
+    - Giáo viên đang điểm danh nhưng vô tình refresh trang
+    - Cần kết nối lại WebSocket mà không mất dữ liệu
+    
+    **Flow:**
+    1. Kiểm tra session còn ongoing
+    2. Xác thực quyền giáo viên
+    3. Generate token WebSocket mới
+    4. Trả về thông tin để kết nối lại
+    
+    **Returns:**
+    - `session_id`: Backend session ID
+    - `ai_session_id`: AI Service session ID  
+    - `ai_ws_url`: WebSocket URL để connect
+    - `ai_ws_token`: JWT token mới cho authentication
+    - `expires_at`: Thời gian hết hạn
+    - `session_name`: Tên phiên điểm danh
+    - `start_time`: Thời gian bắt đầu
+    
+    **Permissions:**
+    - Chỉ teacher của lớp mới được phép
+    """
+    service = AttendanceService(db)
+    return await service.resume_session(current_user, session_id)
 
 
 @router.post("/sessions/{session_id}/end", response_model=EndSessionResponse)
