@@ -684,15 +684,52 @@ class AttendanceService:
         
         if absent_records:
             # Lấy thông tin về ngày và thời gian của session
-            session_date = session.start_time.date()
+            # ✅ FIX: Convert session start_time to Vietnam timezone before extracting date
+            session_start_vietnam = session.start_time
+            if session_start_vietnam.tzinfo is None:
+                # Nếu naive datetime, assume UTC và convert sang Vietnam
+                session_start_vietnam = session_start_vietnam.replace(tzinfo=timezone.utc).astimezone(VIETNAM_TZ)
+            else:
+                # Nếu aware datetime, convert sang Vietnam timezone
+                session_start_vietnam = session_start_vietnam.astimezone(VIETNAM_TZ)
+            
+            session_date = session_start_vietnam.date()
+            
+            # ✅ FIX: Tạo range với timezone-aware datetime để so sánh chính xác
+            # leave_date trong DB có thể lưu dạng UTC, cần convert sang Vietnam
+            day_start_vietnam = datetime.combine(session_date, datetime.min.time()).replace(tzinfo=VIETNAM_TZ)
+            day_end_vietnam = datetime.combine(session_date, datetime.max.time()).replace(tzinfo=VIETNAM_TZ)
+            
+            # Convert sang UTC để so sánh với DB (PostgreSQL thường lưu UTC)
+            day_start_utc = day_start_vietnam.astimezone(timezone.utc)
+            day_end_utc = day_end_vietnam.astimezone(timezone.utc)
+            
+            logger.info(
+                f"Checking leave requests for session {session_id}: "
+                f"session_start_time={session.start_time}, "
+                f"session_date_vietnam={session_date}, "
+                f"day_start_utc={day_start_utc}, day_end_utc={day_end_utc}"
+            )
             
             # Tìm các đơn xin nghỉ đã được chấp nhận cho lớp này trong ngày này
+            # So sánh với cả 2 trường hợp: leave_date lưu dạng UTC hoặc naive
+            from sqlalchemy import or_, func
             approved_leave_requests = self.db.query(LeaveRequest).filter(
                 LeaveRequest.class_id == session.class_id,
                 LeaveRequest.status == RequestStatus.APPROVED.value,
-                LeaveRequest.leave_date >= datetime.combine(session_date, datetime.min.time()),
-                LeaveRequest.leave_date < datetime.combine(session_date, datetime.max.time())
+                or_(
+                    # Case 1: leave_date là UTC aware datetime
+                    (LeaveRequest.leave_date >= day_start_utc) & (LeaveRequest.leave_date < day_end_utc),
+                    # Case 2: leave_date là naive datetime (so sánh trực tiếp với Vietnam date)
+                    func.date(LeaveRequest.leave_date) == session_date
+                )
             ).all()
+            
+            logger.info(
+                f"Found {len(approved_leave_requests)} approved leave requests for class {session.class_id} on {session_date}"
+            )
+            for lr in approved_leave_requests:
+                logger.info(f"  - LeaveRequest ID={lr.id}, student_id={lr.student_id}, leave_date={lr.leave_date}")
             
             # Tạo map student_id -> leave_request để tra cứu nhanh
             approved_student_ids = {lr.student_id: lr for lr in approved_leave_requests}
