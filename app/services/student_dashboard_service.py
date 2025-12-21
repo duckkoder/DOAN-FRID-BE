@@ -137,6 +137,10 @@ class StudentDashboardService:
                 display_status = "Muộn"
             elif status == "absent":
                 display_status = "Vắng"
+            elif status == "pending":
+                display_status = "Chờ duyệt"
+            elif status == "excused":
+                display_status = "Có phép"
             else:
                 display_status = status # fallback
 
@@ -305,8 +309,8 @@ class StudentDashboardService:
         ).order_by(AttendanceRecord.recorded_at.desc()).limit(limit).all()
 
         for record in recent_attendance:
-            class_name = record.session.class_rel.class_name if record.session and record.session.class_rel else "Unknown Class"
-            description = f"Attended {class_name} class"
+            class_name = record.session.class_rel.class_name if record.session and record.session.class_rel else "Lớp không xác định"
+            description = f"Đã điểm danh lớp {class_name}"
             activities.append(RecentActivityItemSchema(
                 description=description,
                 timestamp=record.recorded_at
@@ -322,8 +326,8 @@ class StudentDashboardService:
 
         for lr in recent_leave_requests:
             # Corrected: Access class name directly from lr.class_rel
-            class_name = lr.class_rel.class_name if lr.class_rel else "Unknown Class" # Sửa lỗi ở đây
-            description = f"Appeal submitted for {class_name} class"
+            class_name = lr.class_rel.class_name if lr.class_rel else "Lớp không xác định" # Sửa lỗi ở đây
+            description = f"Đã gửi đơn xin phép lớp {class_name}"
             activities.append(RecentActivityItemSchema(
                 description=description,
                 timestamp=lr.created_at
