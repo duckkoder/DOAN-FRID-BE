@@ -146,6 +146,43 @@ async def delete_teacher(
 
 
 # ============================================================================
+# CLASSES STATS ENDPOINT
+# ============================================================================
+
+@router.get(
+    "/classes/stats",
+    summary="Get classes statistics",
+    description="Get total count of classes. Admin only."
+)
+async def get_classes_stats(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_admin)
+):
+    """
+    Get classes statistics.
+    
+    Returns:
+    - **total**: Total number of classes (all)
+    - **active**: Number of active classes
+    - **inactive**: Number of inactive classes
+    """
+    from app.models.class_model import Class
+    
+    total = db.query(Class).count()
+    active = db.query(Class).filter(Class.is_active == True).count()
+    inactive = db.query(Class).filter(Class.is_active == False).count()
+    
+    return {
+        "success": True,
+        "data": {
+            "total": total,
+            "active": active,
+            "inactive": inactive
+        }
+    }
+
+
+# ============================================================================
 # STUDENT ENDPOINTS
 # ============================================================================
 
