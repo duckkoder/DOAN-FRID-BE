@@ -760,6 +760,13 @@ class AttendanceService:
             except Exception as e:
                 logger.error(f"Failed to fetch and upload face images: {e}")
                 # Continue without images (không block end_session)
+            
+            # ✅ GỌI AI SERVICE LẤY ẢNH GIẢ MẠO VÀ UPLOAD LÊN S3
+            try:
+                await self._fetch_and_upload_spoof_images(session)
+            except Exception as e:
+                logger.error(f"Failed to fetch and upload spoof images: {e}")
+                # Continue without spoof images (không block end_session)
         
         # Cập nhật trạng thái phiên
         session.status = SessionStatus.FINISHED.value
@@ -1107,5 +1114,111 @@ class AttendanceService:
                 
         except Exception as e:
             logger.error(f"Error in _fetch_and_upload_face_images: {e}")
+            raise
+
+    async def _fetch_and_upload_spoof_images(self, session: AttendanceSession):
+        """
+        Gọi AI Service lấy spoof face crops và upload lên S3, sau đó tạo SpoofDetection records.
+        
+        Args:
+            session: AttendanceSession object
+        """
+        from app.services.file_service import FileService
+        from app.models.spoof_detection import SpoofDetection
+        
+        # Lấy teacher_id để làm uploader_id
+        class_obj = self.db.query(Class).filter(Class.id == session.class_id).first()
+        teacher = self.db.query(Teacher).filter(Teacher.id == class_obj.teacher_id).first() if class_obj else None
+        uploader_id = teacher.user_id if teacher else 1  # Fallback to system user
+        
+        # Khởi tạo FileService
+        file_service = FileService(self.db)
+        
+        try:
+            # 1. Gọi AI Service GET /sessions/{ai_session_id}/spoof-faces
+            ai_service_url = f"{settings.AI_SERVICE_URL}/api/v1/sessions/{session.ai_session_id}/spoof-faces"
+            
+            # Timeout 60s cho việc lấy spoof images
+            async with httpx.AsyncClient(timeout=60) as client:
+                response = await client.get(ai_service_url)
+                
+                if response.status_code != 200:
+                    logger.error(f"Failed to fetch spoof faces from AI Service: {response.status_code}")
+                    return
+                
+                data = response.json()
+                spoof_faces = data.get("spoof_faces", [])
+                
+                if not spoof_faces:
+                    logger.info(f"No spoof faces detected for session {session.id}")
+                    return
+                
+                logger.info(f"Fetched {len(spoof_faces)} spoof faces from AI Service")
+                
+                # 2. Upload từng ảnh lên S3 qua FileService và tạo SpoofDetection records
+                uploaded_count = 0
+                
+                for idx, spoof_data in enumerate(spoof_faces):
+                    face_crop_base64 = spoof_data.get("face_crop_base64")
+                    spoofing_type = spoof_data.get("spoofing_type", "spoof")
+                    spoofing_confidence = spoof_data.get("spoofing_confidence", 0.0)
+                    detected_at_str = spoof_data.get("detected_at")
+                    frame_count = spoof_data.get("frame_count")
+                    
+                    if not face_crop_base64:
+                        continue
+                    
+                    try:
+                        # Parse detected_at
+                        detected_at = None
+                        if detected_at_str:
+                            try:
+                                detected_at = datetime.fromisoformat(detected_at_str.replace('Z', '+00:00'))
+                            except:
+                                detected_at = datetime.now(VIETNAM_TZ)
+                        else:
+                            detected_at = datetime.now(VIETNAM_TZ)
+                        
+                        # Upload to S3 via FileService
+                        timestamp_ms = int(datetime.now().timestamp() * 1000)
+                        filename = f"{session.id}/spoof_{idx}_{timestamp_ms}.jpg"
+                        
+                        file_record = await file_service.upload_base64_and_save(
+                            base64_data=face_crop_base64,
+                            filename=filename,
+                            folder="private/spoof-detections",
+                            uploader_id=uploader_id,
+                            category="spoof_detection"
+                        )
+                        
+                        # Get presigned URL
+                        image_url = file_service.get_file_url(file_record.id)
+                        
+                        # Tạo SpoofDetection record
+                        spoof_record = SpoofDetection(
+                            session_id=session.id,
+                            spoofing_type=spoofing_type,
+                            spoofing_confidence=spoofing_confidence,
+                            image_path=image_url,
+                            detected_at=detected_at,
+                            frame_count=frame_count
+                        )
+                        
+                        self.db.add(spoof_record)
+                        self.db.commit()
+                        
+                        uploaded_count += 1
+                        
+                        logger.info(f"✅ Uploaded spoof evidence #{idx}: type={spoofing_type}, confidence={spoofing_confidence:.2f}")
+                        
+                    except Exception as e:
+                        logger.error(f"Failed to process spoof face #{idx}: {e}")
+                        self.db.rollback()
+                        continue
+                
+                logger.info(f"✅ Uploaded {uploaded_count}/{len(spoof_faces)} spoof images to S3")
+                
+        except Exception as e:
+            logger.error(f"Error in _fetch_and_upload_spoof_images: {e}")
             raise
 

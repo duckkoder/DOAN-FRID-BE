@@ -19,6 +19,7 @@ from app.models.class_member import ClassMember
 from app.models.attendance_session import AttendanceSession
 from app.models.attendance_record import AttendanceRecord
 from app.models.attendance_image import AttendanceImage
+from app.models.spoof_detection import SpoofDetection
 from app.models.leave_request import LeaveRequest
 from app.models.refresh_token import RefreshToken
 from app.models.system_log import SystemLog
@@ -44,6 +45,7 @@ __all__ = [
     "AttendanceSession",
     "AttendanceRecord",
     "AttendanceImage",
+    "SpoofDetection",
     "LeaveRequest",
     "RefreshToken",
     "SystemLog",

@@ -120,8 +120,19 @@ async def upload_images_background_task(session_id: int, ai_session_id: str):
         
         if session:
             logger.info(f"Background: Starting image upload for session {session_id}")
+            
+            # Upload ảnh điểm danh thành công
             await service._fetch_and_upload_face_images(session)
-            logger.info(f"Background: Completed image upload for session {session_id}")
+            logger.info(f"Background: Completed face image upload for session {session_id}")
+            
+            # Upload ảnh giả mạo (spoof)
+            try:
+                await service._fetch_and_upload_spoof_images(session)
+                logger.info(f"Background: Completed spoof image upload for session {session_id}")
+            except Exception as e:
+                logger.error(f"Background: Failed to upload spoof images for session {session_id}: {e}")
+            
+            logger.info(f"Background: Completed all image uploads for session {session_id}")
         else:
             logger.warning(f"Background: Session {session_id} not found")
             
@@ -285,6 +296,76 @@ async def get_session_attendance(
     """
     service = AttendanceService(db)
     return await service.get_session_attendance(current_user, session_id)
+
+
+@router.get("/sessions/{session_id}/spoof-detections")
+async def get_session_spoof_detections(
+    session_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """
+    Lấy danh sách các phát hiện giả mạo (spoof) trong phiên điểm danh.
+    
+    **Permissions:**
+    - Giáo viên: Xem spoof detections của phiên mình quản lý
+    - Admin: Xem tất cả
+    
+    **Returns:**
+    - List of spoof detections với image URLs và metadata
+    """
+    from app.models.spoof_detection import SpoofDetection
+    from app.models.teacher import Teacher
+    from app.models.class_model import Class
+    from app.core.enums import UserRole
+    
+    # Kiểm tra session tồn tại
+    session = db.query(AttendanceSession).filter(
+        AttendanceSession.id == session_id
+    ).first()
+    
+    if not session:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Không tìm thấy phiên điểm danh"
+        )
+    
+    # Kiểm tra quyền
+    if current_user.role == UserRole.TEACHER:
+        teacher = db.query(Teacher).filter(Teacher.user_id == current_user.id).first()
+        class_obj = db.query(Class).filter(Class.id == session.class_id).first()
+        
+        if not class_obj or class_obj.teacher_id != teacher.id:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Bạn không có quyền xem phiên này"
+            )
+    elif current_user.role != UserRole.ADMIN:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Chỉ giáo viên hoặc admin mới có thể xem"
+        )
+    
+    # Lấy danh sách spoof detections
+    spoof_detections = db.query(SpoofDetection).filter(
+        SpoofDetection.session_id == session_id
+    ).order_by(SpoofDetection.detected_at.desc()).all()
+    
+    return {
+        "session_id": session_id,
+        "total": len(spoof_detections),
+        "spoof_detections": [
+            {
+                "id": sd.id,
+                "spoofing_type": sd.spoofing_type,
+                "spoofing_confidence": sd.spoofing_confidence,
+                "image_path": sd.image_path,
+                "detected_at": sd.detected_at.isoformat() if sd.detected_at else None,
+                "frame_count": sd.frame_count
+            }
+            for sd in spoof_detections
+        ]
+    }
 
 
 @router.get("/classes/{class_id}/sessions")
