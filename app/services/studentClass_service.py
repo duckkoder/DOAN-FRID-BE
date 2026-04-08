@@ -10,6 +10,9 @@ from app.models.class_member import ClassMember
 from app.models.teacher import Teacher
 from app.models.student import Student
 from app.models.user import User
+from app.models.department import Department
+from app.models.attendance_record import AttendanceRecord
+from app.models.attendance_session import AttendanceSession
 
 
 class StudentClassService:
@@ -310,5 +313,112 @@ class StudentClassService:
                     "joinedAt": member.joined_at.isoformat() + "Z",
                 }
 
+            }
+        }
+
+    @staticmethod
+    async def get_class_students_details(db: Session, user, class_id: int) -> Dict:
+        """Get detailed information of classmates for enrolled student."""
+        student = db.query(Student).filter(Student.user_id == user.id).first()
+        if not student:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Only students can view class members"
+            )
+
+        member = db.query(ClassMember).filter(
+            ClassMember.student_id == student.id,
+            ClassMember.class_id == class_id
+        ).first()
+        if not member:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Class not found or you are not enrolled in this class"
+            )
+
+        cls = db.query(Class).filter(Class.id == class_id).first()
+        if not cls:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Class not found"
+            )
+
+        class_members = db.query(ClassMember).filter(ClassMember.class_id == class_id).all()
+
+        students_data = []
+        total_attendance_rate = 0.0
+        verified_count = 0
+
+        for class_member in class_members:
+            classmate = db.query(Student).filter(Student.id == class_member.student_id).first()
+            if not classmate:
+                continue
+
+            user_info = db.query(User).filter(User.id == classmate.user_id).first()
+            if not user_info:
+                continue
+
+            department_name = None
+            if classmate.department_id:
+                department = db.query(Department).filter(Department.id == classmate.department_id).first()
+                department_name = department.name if department else None
+
+            attendance_records = db.query(AttendanceRecord).join(
+                AttendanceSession, AttendanceRecord.session_id == AttendanceSession.id
+            ).filter(
+                AttendanceSession.class_id == class_id,
+                AttendanceRecord.student_id == classmate.id
+            ).all()
+
+            total_sessions = len(attendance_records)
+            present_count = sum(1 for record in attendance_records if record.status == "present")
+            absent_count = sum(1 for record in attendance_records if record.status == "absent")
+            excused_count = sum(1 for record in attendance_records if record.status == "excused")
+            attendance_rate = (present_count + excused_count) / total_sessions * 100 if total_sessions > 0 else 0.0
+
+            total_attendance_rate += attendance_rate
+            if classmate.is_verified:
+                verified_count += 1
+
+            students_data.append({
+                "id": classmate.id,
+                "studentId": classmate.student_code,
+                "fullName": user_info.full_name,
+                "email": user_info.email,
+                "phone": user_info.phone,
+                "avatar": user_info.avatar_url,
+                "dateOfBirth": classmate.date_of_birth.isoformat() if classmate.date_of_birth else None,
+                "department": department_name,
+                "academicYear": classmate.academic_year,
+                "isVerified": classmate.is_verified,
+                "joinedAt": class_member.joined_at.isoformat() + "Z",
+                "attendanceStats": {
+                    "totalSessions": total_sessions,
+                    "presentCount": present_count,
+                    "absentCount": absent_count,
+                    "excusedCount": excused_count,
+                    "attendanceRate": round(attendance_rate, 2)
+                }
+            })
+
+        total_students = len(students_data)
+        average_attendance_rate = total_attendance_rate / total_students if total_students > 0 else 0.0
+
+        return {
+            "success": True,
+            "data": {
+                "class": {
+                    "id": cls.id,
+                    "className": cls.class_name,
+                    "classCode": cls.class_code,
+                    "totalStudents": total_students
+                },
+                "students": students_data,
+                "summary": {
+                    "totalStudents": total_students,
+                    "verifiedStudents": verified_count,
+                    "unverifiedStudents": total_students - verified_count,
+                    "averageAttendanceRate": round(average_attendance_rate, 2)
+                }
             }
         }

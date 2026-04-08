@@ -7,6 +7,7 @@ from app.api.v1 import auth, admin, files, department, specialization, attendanc
 from app.api.v1 import studentDashboard
 from app.api.v1 import studentAttendanceAPI
 from app.api.v1 import teacher, student
+from app.api.v1 import class_posts
 
 
 # Create main API router
@@ -39,6 +40,9 @@ api_router.include_router(attendance.router, tags=["Attendance"])
 
 # Include face registration router
 api_router.include_router(face_registration.router, tags=["Face Registration"])
+
+# Include class posts router
+api_router.include_router(class_posts.router)
 
 # TODO: Import and include other routers when created
 # from app.api.v1 import users, classes, attendance

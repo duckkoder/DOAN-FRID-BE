@@ -5,6 +5,8 @@ from fastapi import UploadFile, HTTPException, status
 from typing import Literal
 import uuid
 from datetime import datetime
+import re
+import unicodedata
 
 from app.core.config import settings
 
@@ -27,6 +29,24 @@ class S3Service:
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                 detail="AWS credentials not found"
             )
+
+    def _ascii_safe(self, value: str, fallback: str = "na") -> str:
+        """Convert text to ASCII-safe metadata value for S3."""
+        normalized = unicodedata.normalize("NFKD", value or "")
+        ascii_value = normalized.encode("ascii", "ignore").decode("ascii").strip()
+        return ascii_value or fallback
+
+    def _sanitize_metadata(self, metadata: dict[str, str]) -> dict[str, str]:
+        """Sanitize metadata keys and values to satisfy S3 ASCII requirements."""
+        sanitized: dict[str, str] = {}
+        for raw_key, raw_value in metadata.items():
+            key = self._ascii_safe(str(raw_key), fallback="meta")
+            key = re.sub(r"[^a-zA-Z0-9._-]", "-", key).lower()
+            key = key.strip("-_.") or "meta"
+
+            value = self._ascii_safe(str(raw_value), fallback="na")
+            sanitized[key] = value
+        return sanitized
     
     def _validate_file(self, file: UploadFile, file_type: Literal["image", "document"]) -> None:
         """Validate file size and extension."""
@@ -57,7 +77,7 @@ class S3Service:
     async def upload_file(
         self,
         file: UploadFile,
-        folder: Literal["public/avatars", "private/documents", "private/faces", "private/attendance-evidence"],
+        folder: Literal["public/avatars","public/documents", "private/documents", "private/faces", "private/attendance-evidence"],
         file_type: Literal["image", "document"] = "image"
     ) -> dict:
         """Upload file to S3."""
@@ -77,15 +97,17 @@ class S3Service:
         
         # Upload
         try:
+            metadata = self._sanitize_metadata({
+                'original-filename': file.filename,
+                'uploaded-at': datetime.utcnow().isoformat()
+            })
+
             self.s3_client.put_object(
                 Bucket=self.bucket_name,
                 Key=s3_key,
                 Body=file_content,
                 ContentType=file.content_type or "application/octet-stream",
-                Metadata={
-                    'original-filename': file.filename,
-                    'uploaded-at': datetime.utcnow().isoformat()
-                }
+                Metadata=metadata
             )
             
             is_public = folder.startswith("public/")
@@ -162,6 +184,10 @@ class S3Service:
             file_key = f"{folder}/{filename}"
             
             # Upload to S3
+            metadata = self._sanitize_metadata({
+                'uploaded_at': datetime.utcnow().isoformat(),
+                'source': 'ai_service_callback'
+            })
             self.s3_client.upload_fileobj(
                 file_obj,
                 self.bucket_name,
@@ -169,10 +195,7 @@ class S3Service:
                 ExtraArgs={
                     'ContentType': 'image/jpeg',
                     'ACL': 'private',
-                    'Metadata': {
-                        'uploaded_at': datetime.utcnow().isoformat(),
-                        'source': 'ai_service_callback'
-                    }
+                    'Metadata': metadata
                 }
             )
             
@@ -273,6 +296,8 @@ class S3Service:
         if metadata:
             for key, value in metadata.items():
                 s3_metadata[f'custom-{key}'] = str(value)
+
+        s3_metadata = self._sanitize_metadata(s3_metadata)
         
         # Upload
         try:

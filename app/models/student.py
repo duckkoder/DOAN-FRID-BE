@@ -25,6 +25,10 @@ class Student(BaseModel):
     leave_requests = relationship("LeaveRequest", back_populates="student", cascade="all, delete-orphan")
     face_registration_requests = relationship("FaceRegistrationRequest", back_populates="student", cascade="all, delete-orphan")
     face_models = relationship("FaceModel", back_populates="student", cascade="all, delete-orphan")
+    post_reactions = relationship("PostReaction", back_populates="student", cascade="all, delete-orphan")
+    post_comments = relationship("PostComment", back_populates="student", cascade="all, delete-orphan")
+    mentioned_in_posts = relationship("PostMemberMention", back_populates="student", cascade="all, delete-orphan")
+    mentioned_in_comments = relationship("CommentMemberMention", back_populates="student", cascade="all, delete-orphan")
     
     def __repr__(self):
         return f"<Student(id={self.id}, student_code={self.student_code})>"

@@ -87,3 +87,14 @@ async def get_class_details(
     """
     result = await StudentClassService.get_class_details(db, current_user, class_id)
     return result
+
+
+@router.get("/{class_id}/students/details")
+async def get_class_students_details(
+    class_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Get class members details for enrolled student."""
+    result = await StudentClassService.get_class_students_details(db, current_user, class_id)
+    return result

@@ -16,7 +16,7 @@ class FileService:
     async def upload_and_save(
         self,
         file: UploadFile,
-        folder: Literal["public/avatars", "private/documents", "private/faces", "private/attendance-evidence"],
+        folder: Literal["public/avatars", "private/documents", "private/faces", "private/attendance-evidence", "public/documents"],
         uploader_id: int,
         category: str,
         file_type: Literal["image", "document"] = "image"
@@ -48,7 +48,7 @@ class FileService:
         self,
         base64_data: str,
         filename: str,
-        folder: Literal["public/avatars", "private/documents", "private/faces", "private/attendance-evidence"],
+        folder: Literal["public/avatars", "private/documents", "private/faces", "private/attendance-evidence", "public/documents"],
         uploader_id: int,
         category: str
     ) -> File:

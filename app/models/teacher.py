@@ -20,6 +20,9 @@ class Teacher(BaseModel):
     department = relationship("Department", back_populates="teachers")
     specialization = relationship("Specialization", back_populates="teachers")
     classes = relationship("Class", back_populates="teacher", cascade="all, delete-orphan")
+    class_posts = relationship("ClassPost", back_populates="teacher", cascade="all, delete-orphan")
+    post_comments = relationship("PostComment", back_populates="teacher", cascade="all, delete-orphan")
+    post_reactions = relationship("PostReaction", back_populates="teacher", cascade="all, delete-orphan")
     
     def __repr__(self):
         return f"<Teacher(id={self.id}, user_id={self.user_id})>"

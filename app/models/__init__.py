@@ -10,6 +10,16 @@ from app.models.teacher import Teacher
 from app.models.student import Student
 from app.models.model_config import ModelConfig
 from app.models.file import File
+from app.models.class_post import ClassPost
+from app.models.post_reaction import PostReaction
+from app.models.post_comment import PostComment
+from app.models.post_document_mention import PostDocumentMention
+from app.models.post_member_mention import PostMemberMention
+from app.models.comment_document_mention import CommentDocumentMention
+from app.models.comment_member_mention import CommentMemberMention
+from app.models.document import Document
+from app.models.document_chunk import DocumentChunk
+from app.models.post_attachment import PostAttachment
 from app.models.face_embedding import FaceEmbedding
 from app.models.face_registration_request import FaceRegistrationRequest
 from app.models.face_model import FaceModel
@@ -36,6 +46,16 @@ __all__ = [
     "Student",
     "ModelConfig",
     "File",
+    "ClassPost",
+    "PostReaction",
+    "PostComment",
+    "PostDocumentMention",
+    "PostMemberMention",
+    "CommentDocumentMention",
+    "CommentMemberMention",
+    "Document",
+    "DocumentChunk",
+    "PostAttachment",
     "FaceEmbedding",
     "FaceRegistrationRequest",
     "FaceModel",

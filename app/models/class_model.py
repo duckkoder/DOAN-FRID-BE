@@ -18,6 +18,7 @@ class Class(BaseModel):
     
     # Relationships
     teacher = relationship("Teacher", back_populates="classes")
+    posts = relationship("ClassPost", back_populates="class_rel", cascade="all, delete-orphan")
     schedules = relationship("ClassSchedule", back_populates="class_rel", cascade="all, delete-orphan")
     members = relationship("ClassMember", back_populates="class_rel", cascade="all, delete-orphan")
     attendance_sessions = relationship("AttendanceSession", back_populates="class_rel", cascade="all, delete-orphan")
