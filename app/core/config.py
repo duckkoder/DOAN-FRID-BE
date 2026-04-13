@@ -49,7 +49,8 @@ class Settings(BaseSettings):
     ALLOWED_DOCUMENT_EXTENSIONS: str = "pdf,doc,docx,xls,xlsx,jpg,jpeg,png,gif,webp"
     
     # AI Service
-    AI_SERVICE_URL: str = "http://localhost:8096"  # URL của AI Service
+    AI_SERVICE_URL: str = "http://localhost:8096"  # URL của AI Service (internal)
+    AI_SERVICE_PUBLIC_URL: Optional[str] = None     # URL của AI Service (public for WebSocket)
     BACKEND_BASE_URL: str = Field(
         default="http://localhost:8000",  # Default value nếu không có trong .env
         description="URL của Backend (for AI-Service callback)"

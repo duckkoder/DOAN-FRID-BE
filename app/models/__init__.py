@@ -34,6 +34,8 @@ from app.models.leave_request import LeaveRequest
 from app.models.refresh_token import RefreshToken
 from app.models.system_log import SystemLog
 from app.models.ai_training_job import AITrainingJob
+from app.models.chat_session import ChatSession
+from app.models.chat_message import ChatMessage
 
 __all__ = [
     "Base",
@@ -70,4 +72,6 @@ __all__ = [
     "RefreshToken",
     "SystemLog",
     "AITrainingJob",
+    "ChatSession",
+    "ChatMessage",
 ]

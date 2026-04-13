@@ -218,8 +218,13 @@ class AttendanceService:
             }
         )
         
-        # 10. Build WebSocket URL
-        ai_ws_base = settings.AI_SERVICE_URL.replace("http://", "ws://").replace("https://", "wss://")
+        # 10. Build WebSocket URL for Frontend
+        if settings.AI_SERVICE_PUBLIC_URL:
+            ai_ws_base = settings.AI_SERVICE_PUBLIC_URL.rstrip('/')
+        else:
+            # Fallback to internal URL (usually for local dev)
+            ai_ws_base = settings.AI_SERVICE_URL.replace("http://", "ws://").replace("https://", "wss://")
+            
         ai_ws_url = f"{ai_ws_base}/api/v1/sessions/{ai_session_id}/stream"
         
         expires_at = datetime.now(VIETNAM_TZ) + token_expires
@@ -359,8 +364,13 @@ class AttendanceService:
             expires_delta=token_expires
         )
         
-        # 8. Build WebSocket URL
-        ai_ws_base = settings.AI_SERVICE_URL.replace("http://", "ws://").replace("https://", "wss://")
+        # 8. Build WebSocket URL for Frontend
+        if settings.AI_SERVICE_PUBLIC_URL:
+            ai_ws_base = settings.AI_SERVICE_PUBLIC_URL.rstrip('/')
+        else:
+            # Fallback to internal URL (usually for local dev)
+            ai_ws_base = settings.AI_SERVICE_URL.replace("http://", "ws://").replace("https://", "wss://")
+            
         ai_ws_url = f"{ai_ws_base}/api/v1/sessions/{ai_session_id}/stream"
         
         expires_at = datetime.now(VIETNAM_TZ) + token_expires

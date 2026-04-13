@@ -29,6 +29,7 @@ class Student(BaseModel):
     post_comments = relationship("PostComment", back_populates="student", cascade="all, delete-orphan")
     mentioned_in_posts = relationship("PostMemberMention", back_populates="student", cascade="all, delete-orphan")
     mentioned_in_comments = relationship("CommentMemberMention", back_populates="student", cascade="all, delete-orphan")
+    chat_sessions = relationship("ChatSession", back_populates="student", cascade="all, delete-orphan")
     
     def __repr__(self):
         return f"<Student(id={self.id}, student_code={self.student_code})>"
