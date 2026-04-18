@@ -33,21 +33,43 @@ def upgrade():
     )
     op.create_index(op.f('ix_courses_code'), 'courses', ['code'], unique=True)
 
-    # 3. Add Foreign Key constraints to existing tables
-    # First, we might need to clean up any orphaned course_ids (since they were UUIDs without FKs)
-    # But since we're restoring from a fresh backup, we'll assume the data is clean or will be handled.
-    
+    # 3. Create chat_sessions table (chưa có trong chuỗi migration cũ)
+    op.create_table(
+        'chat_sessions',
+        sa.Column('id', postgresql.UUID(as_uuid=True), nullable=False),
+        sa.Column('student_id', sa.Integer(), nullable=False),
+        sa.Column('course_id', postgresql.UUID(as_uuid=True), nullable=False),
+        sa.Column('created_at', sa.DateTime(timezone=True), nullable=False),
+        sa.ForeignKeyConstraint(['student_id'], ['students.id'], ondelete='CASCADE'),
+        sa.ForeignKeyConstraint(['course_id'], ['courses.id'], ondelete='CASCADE'),
+        sa.PrimaryKeyConstraint('id')
+    )
+    op.create_index('ix_chat_sessions_student_id', 'chat_sessions', ['student_id'])
+    op.create_index('ix_chat_sessions_course_id', 'chat_sessions', ['course_id'])
+
+    # 4. Create chat_messages table (chưa có trong chuỗi migration cũ)
+    op.create_table(
+        'chat_messages',
+        sa.Column('id', postgresql.UUID(as_uuid=True), nullable=False),
+        sa.Column('session_id', postgresql.UUID(as_uuid=True), nullable=False),
+        sa.Column('role', sa.Enum('user', 'ai', name='chat_role_enum'), nullable=False),
+        sa.Column('content', sa.Text(), nullable=False),
+        sa.Column('created_at', sa.DateTime(timezone=True), nullable=False),
+        sa.ForeignKeyConstraint(['session_id'], ['chat_sessions.id'], ondelete='CASCADE'),
+        sa.PrimaryKeyConstraint('id')
+    )
+    op.create_index('ix_chat_messages_session_id', 'chat_messages', ['session_id'])
+
+    # 5. Add chunk_index column to document_chunks (nếu chưa có)
+    op.add_column('document_chunks', sa.Column('chunk_index', sa.Integer(), nullable=True))
+
+    # 6. Add Foreign Key constraints to existing documents table
     op.create_foreign_key(
         'fk_documents_course_id_courses', 'documents', 'courses',
         ['course_id'], ['id'], ondelete='CASCADE'
     )
-    
-    op.create_foreign_key(
-        'fk_chat_sessions_course_id_courses', 'chat_sessions', 'courses',
-        ['course_id'], ['id'], ondelete='CASCADE'
-    )
 
-    # 4. Create GIN index for fuzzy search on document_chunks
+    # 7. Create GIN index for fuzzy search on document_chunks
     op.create_index(
         'idx_document_chunks_text_trgm',
         'document_chunks',
