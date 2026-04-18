@@ -32,6 +32,12 @@ class DocumentChunk(Base):
             postgresql_with={"m": 16, "ef_construction": 64},
             postgresql_ops={"embedding": "vector_cosine_ops"},
         ),
+        Index(
+            "idx_document_chunks_text_trgm",
+            "chunk_text",
+            postgresql_using="gin",
+            postgresql_ops={"chunk_text": "gin_trgm_ops"},
+        ),
     )
 
     def __repr__(self):
