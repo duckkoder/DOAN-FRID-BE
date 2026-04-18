@@ -44,6 +44,10 @@ api_router.include_router(face_registration.router, tags=["Face Registration"])
 # Include class posts router
 api_router.include_router(class_posts.router)
 
+# Include RAG proxy router
+from app.api.v1 import rag  # noqa: E402
+api_router.include_router(rag.router)
+
 # TODO: Import and include other routers when created
 # from app.api.v1 import users, classes, attendance
 # api_router.include_router(users.router, prefix="/users", tags=["Users"])

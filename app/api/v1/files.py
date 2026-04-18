@@ -154,6 +154,29 @@ async def upload_document(
 
         document_id = str(document.id)
         document_title = document.title
+
+        # ── Trigger RAG ingestion asynchronously ──────────────────────────
+        # AI Service reads the file from the shared S3 path.
+        # We pass the S3 key so AI Service can download it directly.
+        import asyncio, httpx, logging
+        _log = logging.getLogger(__name__)
+
+        async def _trigger_ingest(doc_id: str, s3_key: str):
+            try:
+                async with httpx.AsyncClient(timeout=10) as client:
+                    resp = await client.post(
+                        f"{settings.AI_SERVICE_URL}/api/v1/rag/ingest",
+                        json={"document_id": doc_id, "s3_key": s3_key},
+                        headers={"X-Callback-Secret": settings.AI_SERVICE_SECRET},
+                    )
+                    _log.info(f"RAG ingest triggered for {doc_id}: {resp.status_code}")
+            except Exception as e:
+                _log.warning(f"RAG ingest trigger failed for {doc_id}: {e}")
+
+        asyncio.create_task(
+            _trigger_ingest(document_id, file_record.file_key)
+        )
+        # ─────────────────────────────────────────────────────────────────
     
     return {
         "success": True,
@@ -169,6 +192,7 @@ async def upload_document(
         },
         "message": "Document uploaded successfully"
     }
+
 
 
 @router.get("/documents/{document_id}/content")
