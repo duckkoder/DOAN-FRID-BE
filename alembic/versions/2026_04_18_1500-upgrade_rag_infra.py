@@ -18,7 +18,7 @@ depends_on = None
 
 def upgrade():
     # 1. Enable extensions
-    op.execute("CREATE EXTENSION IF NOT EXISTS pgvector;")
+    op.execute("CREATE EXTENSION IF NOT EXISTS vector;")
     op.execute("CREATE EXTENSION IF NOT EXISTS pg_trgm;")
 
     # 2. Create courses table
