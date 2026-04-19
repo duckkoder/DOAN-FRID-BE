@@ -64,6 +64,25 @@ def upgrade():
     op.add_column('document_chunks', sa.Column('chunk_index', sa.Integer(), nullable=True))
 
     # 6. Add Foreign Key constraints to existing documents table
+    # Fix any orphaned documents by creating dummy courses first
+    op.execute(
+        """
+        INSERT INTO courses (id, code, title, description, created_at)
+        SELECT DISTINCT course_id, 'MIGRATED_' || SUBSTRING(course_id::text, 1, 8), 'Migrated Course ' || SUBSTRING(course_id::text, 1, 8), 'Auto-generated during migration', NOW()
+        FROM documents
+        WHERE course_id NOT IN (SELECT id FROM courses)
+        """
+    )
+    
+    # Do the same for chat_sessions if any existed
+    op.execute(
+        """
+        INSERT INTO courses (id, code, title, description, created_at)
+        SELECT DISTINCT course_id, 'MIGRATED_' || SUBSTRING(course_id::text, 1, 8), 'Migrated Course ' || SUBSTRING(course_id::text, 1, 8), 'Auto-generated during migration', NOW()
+        FROM chat_sessions
+        WHERE course_id NOT IN (SELECT id FROM courses)
+        """
+    )
     op.create_foreign_key(
         'fk_documents_course_id_courses', 'documents', 'courses',
         ['course_id'], ['id'], ondelete='CASCADE'
