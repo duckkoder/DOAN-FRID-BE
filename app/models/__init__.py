@@ -8,6 +8,7 @@ from app.models.department import Department
 from app.models.specialization import Specialization
 from app.models.teacher import Teacher
 from app.models.student import Student
+from app.models.course import Course
 from app.models.model_config import ModelConfig
 from app.models.file import File
 from app.models.class_post import ClassPost
@@ -46,6 +47,7 @@ __all__ = [
     "Specialization",
     "Teacher",
     "Student",
+    "Course",
     "ModelConfig",
     "File",
     "ClassPost",
