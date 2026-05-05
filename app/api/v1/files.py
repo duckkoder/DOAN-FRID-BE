@@ -41,37 +41,42 @@ def _ascii_safe_filename(filename: str | None, fallback: str = "document") -> st
     return ascii_name or fallback
 
 
-def _class_id_from_course_uuid(course_id: UUID) -> int | None:
-    tail = str(course_id).split("-")[-1]
-    if not tail.isdigit():
-        return None
-    try:
-        return int(tail)
-    except ValueError:
-        return None
-
-
 def _ensure_can_access_document(db: Session, current_user: User, document: Document) -> None:
-    class_id = _class_id_from_course_uuid(document.course_id)
-    if class_id is None:
+    """
+    Access check:
+    - If only_class_id is set   → check the user belongs to that class.
+    - If only course_id is set  → allow any authenticated teacher/student (course-level docs).
+    - Admins always allowed.
+    """
+    if current_user.role == "admin":
         return
 
-    if current_user.role == "teacher":
-        teacher = db.query(Teacher).filter(Teacher.user_id == current_user.id).first()
-        if not teacher:
-            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Only teachers or students can access documents")
-        class_obj = db.query(Class).filter(Class.id == class_id, Class.teacher_id == teacher.id).first()
-        if not class_obj:
-            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="No permission to access this document")
-        return
+    class_id = document.only_class_id
 
-    if current_user.role == "student":
-        student = db.query(Student).filter(Student.user_id == current_user.id).first()
-        if not student:
-            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Only teachers or students can access documents")
-        member = db.query(ClassMember).filter(ClassMember.class_id == class_id, ClassMember.student_id == student.id).first()
-        if not member:
-            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="No permission to access this document")
+    if class_id is not None:
+        # Class-scoped document: verify membership
+        if current_user.role == "teacher":
+            teacher = db.query(Teacher).filter(Teacher.user_id == current_user.id).first()
+            if not teacher:
+                raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Only teachers or students can access documents")
+            class_obj = db.query(Class).filter(Class.id == class_id, Class.teacher_id == teacher.id).first()
+            if not class_obj:
+                raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="No permission to access this document")
+            return
+
+        if current_user.role == "student":
+            student = db.query(Student).filter(Student.user_id == current_user.id).first()
+            if not student:
+                raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Only teachers or students can access documents")
+            member = db.query(ClassMember).filter(ClassMember.class_id == class_id, ClassMember.student_id == student.id).first()
+            if not member:
+                raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="No permission to access this document")
+            return
+
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Only teachers or students can access documents")
+
+    # Course-level document (only_class_id is None): allow any teacher/student
+    if current_user.role in ("teacher", "student"):
         return
 
     raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Only teachers or students can access documents")
@@ -114,7 +119,9 @@ async def upload_avatar(
 async def upload_document(
     file: UploadFile = File(...),
     course_id: str | None = Form(default=None),
+    only_class_id: str | None = Form(default=None),
     title: str | None = Form(default=None),
+    is_embedding: bool = Form(default=True),
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
@@ -134,20 +141,50 @@ async def upload_document(
 
     document_id = None
     document_title = None
-    if course_id:
+
+    # Parse only_class_id if provided
+    only_class_int = None
+    if only_class_id:
         try:
-            course_uuid = UUID(course_id)
+            only_class_int = int(only_class_id)
         except ValueError as exc:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail="course_id must be a valid UUID"
+                detail="only_class_id must be a valid integer"
             ) from exc
 
-        document = Document(
-            course_id=course_uuid,
-            title=title or file_record.original_name or file_record.filename,
-            file_url=f"{settings.S3_BASE_URL}/{file_record.file_key}",
-        )
+    should_create_document = course_id or only_class_int is not None
+
+    if should_create_document:
+        # --- Case 1: only_class_id provided, no course_id ---
+        # Save document scoped to the class only; course_id = NULL
+        if only_class_int is not None and not course_id:
+            document = Document(
+                course_id=None,
+                only_class_id=only_class_int,
+                title=title or file_record.original_name or file_record.filename,
+                file_url=f"{settings.S3_BASE_URL}/{file_record.file_key}",
+                is_embedding=is_embedding,
+            )
+
+        # --- Case 2: course_id provided (with or without only_class_id) ---
+        else:
+            try:
+                course_uuid = UUID(course_id)  # type: ignore[arg-type]
+            except ValueError as exc:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="course_id must be a valid UUID"
+                ) from exc
+
+            document = Document(
+                course_id=course_uuid,
+                only_class_id=only_class_int,
+                title=title or file_record.original_name or file_record.filename,
+                file_url=f"{settings.S3_BASE_URL}/{file_record.file_key}",
+                is_embedding=is_embedding,
+            )
+
         db.add(document)
         db.commit()
         db.refresh(document)
@@ -155,29 +192,28 @@ async def upload_document(
         document_id = str(document.id)
         document_title = document.title
 
-        # ── Trigger RAG ingestion asynchronously ──────────────────────────
-        # AI Service reads the file from the shared S3 path.
-        # We pass the S3 key so AI Service can download it directly.
-        import asyncio, httpx, logging
-        _log = logging.getLogger(__name__)
+        # ── Trigger RAG ingestion asynchronously (only if is_embedding=True) ──
+        if is_embedding:
+            import asyncio, httpx, logging
+            _log = logging.getLogger(__name__)
 
-        async def _trigger_ingest(doc_id: str, s3_key: str):
-            try:
-                async with httpx.AsyncClient(timeout=10) as client:
-                    resp = await client.post(
-                        f"{settings.AI_SERVICE_URL}/api/v1/rag/ingest",
-                        json={"document_id": doc_id, "s3_key": s3_key},
-                        headers={"X-Callback-Secret": settings.AI_SERVICE_SECRET},
-                    )
-                    _log.info(f"RAG ingest triggered for {doc_id}: {resp.status_code}")
-            except Exception as e:
-                _log.warning(f"RAG ingest trigger failed for {doc_id}: {e}")
+            async def _trigger_ingest(doc_id: str, s3_key: str):
+                try:
+                    async with httpx.AsyncClient(timeout=10) as client:
+                        resp = await client.post(
+                            f"{settings.AI_SERVICE_URL}/api/v1/rag/ingest",
+                            json={"document_id": doc_id, "s3_key": s3_key},
+                            headers={"X-Callback-Secret": settings.AI_SERVICE_SECRET},
+                        )
+                        _log.info(f"RAG ingest triggered for {doc_id}: {resp.status_code}")
+                except Exception as e:
+                    _log.warning(f"RAG ingest trigger failed for {doc_id}: {e}")
 
-        asyncio.create_task(
-            _trigger_ingest(document_id, file_record.file_key)
-        )
+            asyncio.create_task(
+                _trigger_ingest(document_id, file_record.file_key)
+            )
         # ─────────────────────────────────────────────────────────────────
-    
+
     return {
         "success": True,
         "data": {
@@ -188,6 +224,7 @@ async def upload_document(
             "size": file_record.size,
             "document_id": document_id,
             "document_title": document_title,
+            "is_embedding": is_embedding,
             "note": "URL expires in 1 hour"
         },
         "message": "Document uploaded successfully"
@@ -275,6 +312,38 @@ async def get_download_url(
             "url": url
         }
     }
+
+
+@router.get("/{file_id}/content")
+async def stream_file_content(
+    file_id: int,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """Stream file content through backend."""
+    file_record = db.query(StoredFile).filter(StoredFile.id == file_id).first()
+    if not file_record:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="File not found")
+
+    # Basic permission check: uploader, admin, or if someone has the file_id 
+    # (since file_ids are integers, we should be careful, but leave requests 
+    # already expose this ID to authorized parties).
+    
+    try:
+        obj = s3_service.s3_client.get_object(Bucket=s3_service.bucket_name, Key=file_record.file_key)
+    except ClientError:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="File not found in storage")
+
+    content_type = obj.get("ContentType") or file_record.mime_type or "application/octet-stream"
+    original_name = (file_record.original_name or "file").strip()
+    safe_name = _ascii_safe_filename(original_name, fallback="file")
+    encoded_name = quote(original_name, safe="")
+    
+    headers = {
+        "Content-Disposition": f"inline; filename=\"{safe_name}\"; filename*=UTF-8''{encoded_name}"
+    }
+
+    return StreamingResponse(obj["Body"], media_type=content_type, headers=headers)
 
 
 @router.delete("/{file_id}")

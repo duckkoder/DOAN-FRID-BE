@@ -1,7 +1,7 @@
 """Document model for source files uploaded for RAG processing."""
 import uuid
 
-from sqlalchemy import Column, String, DateTime, Index, ForeignKey
+from sqlalchemy import Column, String, DateTime, Index, ForeignKey, Boolean, Integer
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import relationship
 
@@ -14,9 +14,11 @@ class Document(Base):
     __tablename__ = "documents"
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    course_id = Column(UUID(as_uuid=True), ForeignKey("courses.id", ondelete="CASCADE"), nullable=False, index=True)
+    course_id = Column(UUID(as_uuid=True), ForeignKey("courses.id", ondelete="CASCADE"), nullable=True, index=True)
+    only_class_id = Column(Integer, ForeignKey("classes.id", ondelete="CASCADE"), nullable=True, index=True)
     title = Column(String(255), nullable=False)
     file_url = Column(String(1000), nullable=False)
+    is_embedding = Column(Boolean, default=True)
     uploaded_at = Column(DateTime(timezone=True), default=get_vietnam_time, nullable=False)
 
     chunks = relationship("DocumentChunk", back_populates="document", cascade="all, delete-orphan")

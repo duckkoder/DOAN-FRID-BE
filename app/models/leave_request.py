@@ -13,8 +13,8 @@ class LeaveRequest(BaseModel):
     class_id = Column(Integer, ForeignKey("classes.id", ondelete="CASCADE"), nullable=False)
     reason = Column(Text, nullable=False)
     leave_date = Column(DateTime, nullable=False)  # Single date for leave
-    day_of_week = Column(String(20), nullable=False)  # e.g., "Monday"
-    time_slot = Column(String(50), nullable=True)  # e.g., "Morning", "Afternoon"
+    day_of_week = Column(Integer, nullable=False)  # 0=Monday, 1=Tuesday, ..., 6=Sunday
+    time_slot = Column(String(50), nullable=True)  # e.g., "1-3", "4-4"
     evidence_file_id = Column(Integer, ForeignKey("files.id", ondelete="SET NULL"), nullable=True)
     status = Column(String(50), nullable=False, default="pending")  # pending, approved, rejected, cancelled
     reviewed_by = Column(Integer, ForeignKey("teachers.id", ondelete="SET NULL"), nullable=True)  # ✅ Changed to teachers.id

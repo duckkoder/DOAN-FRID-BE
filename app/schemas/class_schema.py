@@ -3,53 +3,53 @@ from typing import Optional, Dict, List, Any
 from datetime import datetime
 
 
-class ScheduleModel(BaseModel):
-    """Weekly schedule with period ranges (format: '1-3' means periods 1 to 3)."""
-    monday: Optional[List[str]] = Field(default_factory=list)
-    tuesday: Optional[List[str]] = Field(default_factory=list)
-    wednesday: Optional[List[str]] = Field(default_factory=list)
-    thursday: Optional[List[str]] = Field(default_factory=list)
-    friday: Optional[List[str]] = Field(default_factory=list)
-    saturday: Optional[List[str]] = Field(default_factory=list)
-    sunday: Optional[List[str]] = Field(default_factory=list)
-    
-    @field_validator('monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday', 'sunday')
+class DaySchedule(BaseModel):
+    day: int = Field(..., ge=0, le=6, description="0=Monday, 6=Sunday")
+    periods: List[int] = Field(..., description="List of periods (1-12)")
+    location: Optional[str] = Field(None, max_length=255, description="Location for this specific session")
+    room: Optional[str] = Field(None, max_length=255, description="Legacy alias for location")
+
+    @field_validator('periods')
     @classmethod
     def validate_periods(cls, v):
-        if v is None:
-            return []
-        for period in v:
-            if not isinstance(period, str) or '-' not in period:
-                raise ValueError(f"Period must be in format '1-3', got '{period}'")
-            try:
-                start, end = period.split('-')
-                start_num, end_num = int(start), int(end)
-                if start_num < 1 or end_num > 12 or start_num > end_num:
-                    raise ValueError(f"Invalid period range: {period}")
-            except ValueError:
-                raise ValueError(f"Invalid period format '{period}'")
-        return v
-    
+        if not v:
+            raise ValueError("Periods list cannot be empty")
+        for p in v:
+            if p < 1 or p > 12:
+                raise ValueError(f"Period must be between 1 and 12, got {p}")
+        return sorted(v)
+
+    @model_validator(mode='after')
+    def normalize_location(self):
+        if self.location is None and self.room:
+            self.location = self.room
+        return self
+
+
+class ScheduleModel(BaseModel):
+    """Weekly schedule with day index and period numbers."""
+    schedules: List[DaySchedule] = Field(..., description="List of day schedules")
+
     @model_validator(mode='after')
     def check_at_least_one_day(self):
         """Ensure at least one day has schedule."""
-        days = ['monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday', 'sunday']
-        has_schedule = any(
-            getattr(self, day) and len(getattr(self, day)) > 0 
-            for day in days
-        )
-        if not has_schedule:
+        if not self.schedules:
             raise ValueError("Schedule must have at least one day with periods")
         return self
+
+
+class DeleteWithPasswordRequest(BaseModel):
+    """Request to delete a resource requiring password verification."""
+    password: str = Field(..., description="User's password for verification")
 
 
 class CreateClassRequest(BaseModel):
     """Request to create a new class - based on Class model."""
     class_name: str = Field(..., max_length=255, description="Class name")
     teacher_id: int = Field(..., description="Teacher ID from teachers table")
-    location: Optional[str] = Field(None, max_length=255, description="Class location/room")
+    course_id: Optional[str] = Field(None, description="Course UUID")
     description: Optional[str] = Field(None, max_length=255, description="Class description")
-    schedule: ScheduleModel = Field(..., description="Weekly schedule (required, stored in class_schedules)")
+    schedule: ScheduleModel = Field(..., description="Weekly schedule with location per session (stored in class_schedules)")
 
     @model_validator(mode='after')
     def validate_schedule_not_empty(self):
@@ -64,12 +64,12 @@ class CreateClassRequest(BaseModel):
                 {
                     "class_name": "Java Programming Advanced",
                     "teacher_id": 1,
-                    "location": "LAB-101",
                     "description": "Advanced Java Programming Course",
                     "schedule": {
-                        "monday": ["1-3", "6-9"],
-                        "wednesday": ["1-3"],
-                        "friday": ["4-6"]
+                        "schedules": [
+                            {"day": 0, "periods": [1, 2, 3], "location": "A101"},
+                            {"day": 2, "periods": [6, 7, 8], "location": "LAB2"}
+                        ]
                     }
                 }
             ]
@@ -80,7 +80,6 @@ class CreateClassRequest(BaseModel):
 class UpdateClassRequest(BaseModel):
     """Request to update a class."""
     class_name: Optional[str] = Field(None, max_length=255)
-    location: Optional[str] = Field(None, max_length=255)
     description: Optional[str] = Field(None, max_length=255)
     is_active: Optional[bool] = None
     schedule: Optional[ScheduleModel] = None
@@ -89,12 +88,7 @@ class UpdateClassRequest(BaseModel):
     def validate_schedule_if_provided(self):
         """If schedule is provided, ensure it's not empty."""
         if self.schedule is not None:
-            days = ['monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday', 'sunday']
-            has_schedule = any(
-                getattr(self.schedule, day) and len(getattr(self.schedule, day)) > 0 
-                for day in days
-            )
-            if not has_schedule:
+            if not getattr(self.schedule, 'schedules', []):
                 raise ValueError("If schedule is provided, it must have at least one day with periods")
         return self
 
@@ -103,16 +97,21 @@ class UpdateClassRequest(BaseModel):
             "examples": [
                 {
                     "class_name": "Java Programming Advanced - Updated",
-                    "location": "LAB-102",
                     "description": "Updated description",
                     "schedule": {
-                        "monday": ["1-3"],
-                        "wednesday": ["1-3"]
+                        "schedules": [
+                            {"day": 0, "periods": [1, 2, 3], "location": "A101"},
+                            {"day": 2, "periods": [6, 7, 8], "location": "LAB2"}
+                        ]
                     }
                 }
             ]
         }
     }
+
+class UpdateClassCourseRequest(BaseModel):
+    """Request to update a class's course."""
+    course_id: str = Field(..., description="Course UUID")
 
 
 class ClassResponse(BaseModel):
@@ -121,7 +120,7 @@ class ClassResponse(BaseModel):
     class_name: str = Field(..., alias="className")
     class_code: str = Field(..., alias="classCode")
     teacher_id: int = Field(..., alias="teacherId")
-    location: Optional[str] = None
+    course_id: Optional[str] = Field(None, alias="courseId")
     description: Optional[str] = None
     is_active: bool = Field(..., alias="isActive")
     created_at: datetime = Field(..., alias="createdAt")
@@ -138,7 +137,7 @@ class StudentClassResponse(BaseModel):
     class_name: str = Field(..., alias="className")
     class_code: str = Field(..., alias="classCode")
     teacher_name: str = Field(..., alias="teacherName")
-    location: Optional[str] = None
+    course_id: Optional[str] = Field(None, alias="courseId")
     description: Optional[str] = None
     schedule: ScheduleModel = Field(..., alias="schedule")
     is_active: bool = Field(..., alias="isActive")
@@ -163,7 +162,6 @@ class ClassListItem(BaseModel):
     id: int
     subject: str  # Same as class_name
     name: str  # Same as class_name
-    location: Optional[str] = None
     status: str  # "active" or "inactive" based on is_active
     classCode: str = Field(..., alias="classCode")
     studentCount: int = Field(default=0, alias="studentCount")
@@ -223,9 +221,9 @@ class ClassDetailResponse(BaseModel):
     teacherId: int = Field(..., alias="teacherId")
     students: int  # count of class_members
     schedule: ScheduleModel  # Human-readable from class_schedules
-    room: Optional[str]  # Same as location
     status: str  # "active" or "inactive"
     classCode: str = Field(..., alias="classCode")
+    courseId: Optional[str] = Field(None, alias="courseId")
     description: Optional[str]
 
     model_config = {"populate_by_name": True}

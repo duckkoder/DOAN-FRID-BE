@@ -74,26 +74,25 @@ class LeaveRequestService:
         
         # Verify class schedule matches the leave request
         from app.models.class_schedule import ClassSchedule
-        class_schedule = db.query(ClassSchedule).filter(
+        class_schedules = db.query(ClassSchedule).filter(
             ClassSchedule.class_id == payload.class_id
-        ).first()
-        
-        if not class_schedule or not class_schedule.schedule_data:
+        ).all()
+
+        if not class_schedules:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="Class schedule not found. Cannot create leave request."
             )
         
-        # Validate day_of_week and time_slot against schedule
-        # Note: schedule_data uses lowercase keys (monday, tuesday, etc.)
-        # but API accepts capitalized format (Monday, Tuesday, etc.)
-        schedule_data = class_schedule.schedule_data
-        day_key = payload.day_of_week.lower()  # Convert "Monday" -> "monday" for DB lookup
-        
-        if day_key not in schedule_data:
+        # Validate day_of_week and time_slot against schedule rows
+        day_index = payload.day_of_week  # already 0=Monday..6=Sunday
+
+        day_schedules = [s for s in class_schedules if (s.schedule_data or {}).get("day") == day_index]
+
+        if not day_schedules:
             raise ValidationError(
                 field="day_of_week",
-                message=f"Class does not have schedule on {payload.day_of_week}",
+                message=f"Class does not have schedule on day {payload.day_of_week}",
                 value=payload.day_of_week
             )
         
@@ -103,31 +102,25 @@ class LeaveRequestService:
         request_end = int(time_parts[1])
         request_periods = set(range(request_start, request_end + 1))
         
-        # Get class periods from schedule (e.g., ["1-3", "6-9"])
-        class_periods = schedule_data[day_key]
+        # Get class periods from the matching schedule row(s)
+        class_periods = []
+        for schedule_row in day_schedules:
+            class_periods.extend((schedule_row.schedule_data or {}).get("periods", []))
+
         if not class_periods:
             raise ValidationError(
                 field="day_of_week",
                 message=f"Class does not have any periods scheduled on {payload.day_of_week}",
                 value=payload.day_of_week
             )
-        
-        # Convert class periods to set of individual periods
-        all_class_periods = set()
-        for period_range in class_periods:
-            if isinstance(period_range, str) and '-' in period_range:
-                parts = period_range.split('-')
-                start = int(parts[0])
-                end = int(parts[1])
-                all_class_periods.update(range(start, end + 1))
-            elif isinstance(period_range, int):
-                all_class_periods.add(period_range)
+
+        all_class_periods = set(class_periods)
         
         # Check if requested periods are within class schedule
         if not request_periods.issubset(all_class_periods):
             raise ValidationError(
                 field="time_slot",
-                message=f"Time slot {payload.time_slot} does not match class schedule on {payload.day_of_week}. Class periods: {class_periods}",
+                message=f"Time slot {payload.time_slot} does not match class schedule on day {payload.day_of_week}. Class periods: {class_periods}",
                 value=payload.time_slot
             )
         
@@ -265,6 +258,7 @@ class LeaveRequestService:
                 "id": req.id,
                 "studentId": req.student_id,
                 "studentName": student_user.full_name if student_user else "Unknown",
+                "studentCode": student_obj.student_code if student_obj else None,
                 "classId": req.class_id,
                 "className": cls.class_name if cls else "Unknown",
                 "reason": req.reason,
@@ -359,6 +353,7 @@ class LeaveRequestService:
                     "id": leave_request.id,
                     "studentId": leave_request.student_id,
                     "studentName": student_user.full_name if student_user else "Unknown",
+                    "studentCode": student_obj.student_code if student_obj else None,
                     "classId": leave_request.class_id,
                     "className": cls.class_name if cls else "Unknown",
                     "reason": leave_request.reason,
@@ -424,26 +419,25 @@ class LeaveRequestService:
             new_day = payload.day_of_week if payload.day_of_week is not None else leave_request.day_of_week
             new_time_slot = payload.time_slot if payload.time_slot is not None else leave_request.time_slot
             
-            # Get class schedule
-            class_schedule = db.query(ClassSchedule).filter(
+            # Get class schedule rows
+            class_schedules = db.query(ClassSchedule).filter(
                 ClassSchedule.class_id == leave_request.class_id
-            ).first()
-            
-            if not class_schedule or not class_schedule.schedule_data:
+            ).all()
+
+            if not class_schedules:
                 raise HTTPException(
                     status_code=status.HTTP_400_BAD_REQUEST,
                     detail="Class schedule not found. Cannot update leave request."
                 )
             
-            # Validate against schedule
-            # Note: schedule_data uses lowercase keys but API accepts capitalized format
-            schedule_data = class_schedule.schedule_data
-            day_key = new_day.lower()  # Convert "Monday" -> "monday" for DB lookup
-            
-            if day_key not in schedule_data:
+            day_index = new_day  # already int 0-6
+
+            day_schedules = [s for s in class_schedules if (s.schedule_data or {}).get("day") == day_index]
+
+            if not day_schedules:
                 raise HTTPException(
                     status_code=status.HTTP_400_BAD_REQUEST,
-                    detail=f"Class does not have schedule on {new_day}"
+                    detail=f"Class does not have schedule on day {new_day}"
                 )
             
             # Parse time_slot
@@ -453,7 +447,9 @@ class LeaveRequestService:
             request_periods = set(range(request_start, request_end + 1))
             
             # Get class periods
-            class_periods = schedule_data[day_key]
+            class_periods = []
+            for schedule_row in day_schedules:
+                class_periods.extend((schedule_row.schedule_data or {}).get("periods", []))
             if not class_periods:
                 raise HTTPException(
                     status_code=status.HTTP_400_BAD_REQUEST,
@@ -461,15 +457,7 @@ class LeaveRequestService:
                 )
             
             # Convert class periods to set
-            all_class_periods = set()
-            for period_range in class_periods:
-                if isinstance(period_range, str) and '-' in period_range:
-                    parts = period_range.split('-')
-                    start = int(parts[0])
-                    end = int(parts[1])
-                    all_class_periods.update(range(start, end + 1))
-                elif isinstance(period_range, int):
-                    all_class_periods.add(period_range)
+            all_class_periods = set(class_periods)
             
             # Check if requested periods match
             if not request_periods.issubset(all_class_periods):

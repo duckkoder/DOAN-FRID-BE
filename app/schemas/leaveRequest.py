@@ -8,42 +8,39 @@ class CreateLeaveRequestRequest(BaseModel):
     class_id: int = Field(..., description="Class ID")
     reason: str = Field(..., min_length=10, max_length=1000, description="Reason for leave")
     leave_date: datetime = Field(..., description="Date of leave (YYYY-MM-DD)")
-    day_of_week: str = Field(..., description="Day of week (Monday, Tuesday, Wednesday, Thursday, Friday, Saturday, Sunday)")
-    time_slot: str = Field(..., description="Time slot in format 'x-y' where x,y are 1-10 (e.g., '1-3', '6-10')")
+    day_of_week: int = Field(..., ge=0, le=6, description="Day of week as integer: 0=Monday, 1=Tuesday, ..., 6=Sunday")
+    time_slot: str = Field(..., description="Time slot in format 'x-y' where x,y are 1-10 (e.g., '1-3', '4-4')")
     evidence_file_id: Optional[int] = Field(None, description="ID of uploaded evidence file")
-    
-    @field_validator('day_of_week')
-    @classmethod
-    def validate_day_of_week(cls, v):
-        """Validate day of week - must be capitalized format (e.g., Monday)."""
-        valid_days = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday']
-        # Check if input is in correct capitalized format
-        if v not in valid_days:
-            raise ValueError(f"day_of_week must be one of: {', '.join(valid_days)} (first letter capitalized)")
-        return v
     
     @field_validator('time_slot')
     @classmethod
     def validate_time_slot(cls, v):
-        """Validate time slot format: 'x-y' where x,y are 1-10."""
+        """Validate time slot format: 'x-y' or 'x' where x,y are 1-10. Normalizes 'x' to 'x-x'."""
         import re
         if not v:
             raise ValueError("time_slot is required")
+        
+        # Allow single number 'x' -> normalize to 'x-x'
+        single_pattern = r'^(\d+)$'
+        single_match = re.match(single_pattern, v)
+        if single_match:
+            n = int(single_match.group(1))
+            if n < 1 or n > 10:
+                raise ValueError("time_slot period must be between 1 and 10")
+            return f"{n}-{n}"
         
         # Check format x-y
         pattern = r'^(\d+)-(\d+)$'
         match = re.match(pattern, v)
         if not match:
-            raise ValueError("time_slot must be in format 'x-y' (e.g., '1-3', '6-10')")
+            raise ValueError("time_slot must be in format 'x-y' or 'x' (e.g., '1-3', '4-4', '4')")
         
         start = int(match.group(1))
         end = int(match.group(2))
         
-        # Check range 1-10
         if start < 1 or start > 10 or end < 1 or end > 10:
             raise ValueError("time_slot periods must be between 1 and 10")
         
-        # Check start <= end
         if start > end:
             raise ValueError("time_slot start must be less than or equal to end")
         
@@ -69,41 +66,35 @@ class UpdateLeaveRequestRequest(BaseModel):
     """Request to update a leave request (only for pending status)."""
     reason: Optional[str] = Field(None, min_length=10, max_length=1000)
     leave_date: Optional[datetime] = None
-    day_of_week: Optional[str] = None
+    day_of_week: Optional[int] = Field(None, ge=0, le=6, description="Day of week as integer: 0=Monday..6=Sunday")
     time_slot: Optional[str] = None
     evidence_file_id: Optional[int] = None
-    
-    @field_validator('day_of_week')
-    @classmethod
-    def validate_day_of_week(cls, v):
-        """Validate day of week - must be capitalized format (e.g., Monday)."""
-        if v is not None:
-            valid_days = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday']
-            # Check if input is in correct capitalized format
-            if v not in valid_days:
-                raise ValueError(f"day_of_week must be one of: {', '.join(valid_days)} (first letter capitalized)")
-        return v
     
     @field_validator('time_slot')
     @classmethod
     def validate_time_slot(cls, v):
-        """Validate time slot format: 'x-y' where x,y are 1-10."""
+        """Validate time slot format: 'x-y' or 'x' where x,y are 1-10. Normalizes 'x' to 'x-x'."""
         if v is not None:
             import re
-            # Check format x-y
+            single_pattern = r'^(\d+)$'
+            single_match = re.match(single_pattern, v)
+            if single_match:
+                n = int(single_match.group(1))
+                if n < 1 or n > 10:
+                    raise ValueError("time_slot period must be between 1 and 10")
+                return f"{n}-{n}"
+            
             pattern = r'^(\d+)-(\d+)$'
             match = re.match(pattern, v)
             if not match:
-                raise ValueError("time_slot must be in format 'x-y' (e.g., '1-3', '6-10')")
+                raise ValueError("time_slot must be in format 'x-y' or 'x' (e.g., '1-3', '4-4', '4')")
             
             start = int(match.group(1))
             end = int(match.group(2))
             
-            # Check range 1-10
             if start < 1 or start > 10 or end < 1 or end > 10:
                 raise ValueError("time_slot periods must be between 1 and 10")
             
-            # Check start <= end
             if start > end:
                 raise ValueError("time_slot start must be less than or equal to end")
         

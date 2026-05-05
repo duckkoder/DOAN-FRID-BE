@@ -16,6 +16,18 @@ from app.models.attendance_session import AttendanceSession
 
 
 class StudentClassService:
+
+    @staticmethod
+    def _build_schedule_model(schedule_rows):
+        schedules = []
+        for row in sorted(schedule_rows, key=lambda item: (item.schedule_data.get("day", 0), item.id)):
+            data = row.schedule_data or {}
+            schedules.append({
+                "day": data.get("day"),
+                "periods": data.get("periods", []),
+                "location": row.location,
+            })
+        return {"schedules": schedules}
     
     @staticmethod
     async def join_class(db: Session, user, class_code: str) -> Dict:
@@ -88,7 +100,6 @@ class StudentClassService:
                     "className": cls.class_name,
                     "classCode": cls.class_code,
                     "teacherName": teacher_user.full_name if teacher_user else "Unknown",
-                    "location": cls.location,
                     "description": cls.description,
                     "joinedAt": new_member.joined_at.isoformat() + "Z"
                 }
@@ -182,36 +193,22 @@ class StudentClassService:
             if not teacher_user:
                 continue
             
-            # Get ClassSchedule
-            schedule = db.query(ClassSchedule).filter(
+            # Get ClassSchedule rows
+            schedule_rows = db.query(ClassSchedule).filter(
                 ClassSchedule.class_id == cls.id
-            ).first()
-            
-            schedule_data = {
-                "monday": [],
-                "tuesday": [],
-                "wednesday": [],
-                "thursday": [],
-                "friday": [],
-                "saturday": [],
-                "sunday": []
-            }
-            
-            if schedule and schedule.schedule_data:
-                # Merge with actual data
-                for day, periods in schedule.schedule_data.items():
-                    if day in schedule_data and periods:
-                        schedule_data[day] = periods
-            
+            ).all()
+
+            schedule_data = StudentClassService._build_schedule_model(schedule_rows) if schedule_rows else None
+
             classes_data.append({
                 "id": cls.id,
                 "className": cls.class_name,
                 "classCode": cls.class_code,
                 "teacherName": teacher_user.full_name,
-                "location": cls.location,
                 "description": cls.description,
                 "schedule": schedule_data,
                 "isActive": cls.is_active,
+                "courseId": str(cls.course_id) if cls.course_id else None,
                 "createdAt": cls.created_at.isoformat() + "Z",
                 "updatedAt": cls.updated_at.isoformat() + "Z" if cls.updated_at else None
             })
@@ -266,31 +263,18 @@ class StudentClassService:
         teacher = db.query(Teacher).filter(Teacher.id == cls.teacher_id).first()
         teacher_user = db.query(User).filter(User.id == teacher.user_id).first() if teacher else None
         
-        # Get ClassSchedule
-        schedule = db.query(ClassSchedule).filter(
+        # Get ClassSchedule rows
+        schedule_rows = db.query(ClassSchedule).filter(
             ClassSchedule.class_id == cls.id
-        ).first()
-        
-        schedule_data = {
-            "monday": [],
-            "tuesday": [],
-            "wednesday": [],
-            "thursday": [],
-            "friday": [],
-            "saturday": [],
-            "sunday": []
-        }
-        
-        if schedule and schedule.schedule_data:
-            for day, periods in schedule.schedule_data.items():
-                if day in schedule_data and periods:
-                    schedule_data[day] = periods
-        
+        ).all()
+
+        schedule_data = StudentClassService._build_schedule_model(schedule_rows) if schedule_rows else None
+
         # Count total students in class
         total_students = db.query(ClassMember).filter(
             ClassMember.class_id == class_id
         ).count()
-        
+
         return {
             "success": True,
             "data": {
@@ -300,7 +284,6 @@ class StudentClassService:
                     "classCode": cls.class_code,
                     "teacherName": teacher_user.full_name if teacher_user else "Unknown",
                     "teacherId": teacher.id if teacher else None,
-                    "location": cls.location,
                     "description": cls.description,
                     "schedule": schedule_data,
                     "isActive": cls.is_active,

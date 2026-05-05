@@ -11,7 +11,9 @@ from app.schemas.class_schema import (
     GetClassesListResponse,
     GetClassDetailsResponse,
     UpdateClassRequest,
+    UpdateClassCourseRequest,
     ClassStudentsDetailResponse,  # ✅ Add this import
+    DeleteWithPasswordRequest,
 )
 from app.services.teacherClass_service import TeacherClassService
 
@@ -66,13 +68,39 @@ async def update_class(
 @router.delete("/{class_id}")
 async def delete_class(
     class_id: int,
+    payload: DeleteWithPasswordRequest,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    """Deactivate a class (soft delete)."""
+    """Deactivate a class (soft delete) with password verification."""
+    from app.core.security import verify_password
+    if not verify_password(payload.password, current_user.password_hash):
+        from fastapi import HTTPException
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Mật khẩu không chính xác")
+
     result = await TeacherClassService.delete_class(db, current_user, class_id)
     return result
 
+@router.post("/{class_id}/restore")
+async def restore_class(
+    class_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Reactivate a class."""
+    result = await TeacherClassService.restore_class(db, current_user, class_id)
+    return result
+
+@router.patch("/{class_id}/course")
+async def update_class_course(
+    class_id: int,
+    payload: UpdateClassCourseRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Update the course associated with a class."""
+    result = await TeacherClassService.update_class_course(db, current_user, class_id, payload)
+    return result
 
 @router.get("/{class_id}/students/details", response_model=ClassStudentsDetailResponse)
 async def get_class_students_details(

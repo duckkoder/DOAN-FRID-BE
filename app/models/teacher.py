@@ -20,6 +20,7 @@ class Teacher(BaseModel):
     department = relationship("Department", back_populates="teachers")
     specialization = relationship("Specialization", back_populates="teachers")
     classes = relationship("Class", back_populates="teacher", cascade="all, delete-orphan")
+    courses = relationship("Course", back_populates="teacher", cascade="all, delete-orphan")
     class_posts = relationship("ClassPost", back_populates="teacher", cascade="all, delete-orphan")
     post_comments = relationship("PostComment", back_populates="teacher", cascade="all, delete-orphan")
     post_reactions = relationship("PostReaction", back_populates="teacher", cascade="all, delete-orphan")

@@ -1,6 +1,6 @@
 """Service for class operations - based on Class, ClassSchedule, ClassMember models."""
 from datetime import datetime
-from typing import Dict, Optional, Set
+from typing import Dict, Optional, List
 import random
 import string
 from sqlalchemy.orm import Session
@@ -10,6 +10,8 @@ from app.schemas.class_schema import CreateClassRequest, UpdateClassRequest
 from app.models.class_model import Class
 from app.models.class_schedule import ClassSchedule
 from app.models.class_member import ClassMember
+from app.models.room import Room
+from app.models.course import Course
 from app.models.teacher import Teacher
 from app.models.student import Student
 from app.models.user import User
@@ -20,6 +22,71 @@ from app.services.file_service import FileService  # ✅ Add this
 
 
 class TeacherClassService:
+
+    @staticmethod
+    def _normalize_schedule_entries(schedule_payload: Dict) -> List[Dict]:
+        """Normalize schedule payload into a list of day/session entries."""
+        schedules = schedule_payload.get("schedules", [])
+        if not isinstance(schedules, list):
+            return []
+
+        def _split_consecutive(periods: List[int]) -> List[List[int]]:
+            if not periods:
+                return []
+            sorted_periods = sorted(set(periods))
+            groups: List[List[int]] = []
+            current = [sorted_periods[0]]
+            for p in sorted_periods[1:]:
+                if p == current[-1] + 1:
+                    current.append(p)
+                else:
+                    groups.append(current)
+                    current = [p]
+            groups.append(current)
+            return groups
+
+        normalized_entries: List[Dict] = []
+        for entry in schedules:
+            if not isinstance(entry, dict):
+                continue
+
+            normalized_entry = dict(entry)
+            if not normalized_entry.get("location") and normalized_entry.get("room"):
+                normalized_entry["location"] = normalized_entry["room"]
+            normalized_entry.pop("room", None)
+
+            periods = normalized_entry.get("periods") or []
+            location = normalized_entry.get("location")
+            day = normalized_entry.get("day")
+
+            if day is None or not periods:
+                continue
+
+            for group in _split_consecutive(periods):
+                normalized_entries.append({
+                    "day": day,
+                    "periods": group,
+                    "location": location,
+                })
+
+        return normalized_entries
+
+    @staticmethod
+    def _build_schedule_model(schedule_rows: List[ClassSchedule]) -> Dict:
+        """Build API schedule model from multiple ClassSchedule rows."""
+        schedules = []
+        for row in sorted(schedule_rows, key=lambda item: ((item.schedule_data or {}).get("day", 0), item.id)):
+            data = row.schedule_data or {}
+            schedules.append({
+                "day": data.get("day"),
+                "periods": data.get("periods", []),
+                "location": row.location,
+            })
+        return {"schedules": schedules}
+
+    @staticmethod
+    def _periods_overlap(left: List[int], right: List[int]) -> bool:
+        return bool(set(left) & set(right))
     
     @staticmethod
     def generate_class_code(db: Session, max_length: int = 9) -> str:
@@ -47,59 +114,40 @@ class TeacherClassService:
         Returns:
             (has_conflict: bool, conflict_message: str)
         """
-        # Get all active classes of the teacher
-        query = db.query(Class).filter(
+        query = db.query(ClassSchedule).join(Class).filter(
             Class.teacher_id == teacher_id,
             Class.is_active == True
         )
-        
-        # Exclude current class if updating
+
         if exclude_class_id:
             query = query.filter(Class.id != exclude_class_id)
-        
-        existing_classes = query.all()
-        
-        # Check each existing class schedule
-        for cls in existing_classes:
-            schedule = db.query(ClassSchedule).filter(
-                ClassSchedule.class_id == cls.id
-            ).first()
-            
-            if not schedule or not schedule.schedule_data:
-                continue
-            
-            # Check for conflicts day by day
-            for day, new_periods in new_schedule.items():
-                if not new_periods:
+
+        existing_schedules = query.all()
+        new_schedules = TeacherClassService._normalize_schedule_entries(new_schedule)
+
+        for new_day_schedule in new_schedules:
+            day = new_day_schedule["day"]
+            new_periods = new_day_schedule["periods"]
+
+            for existing_schedule in existing_schedules:
+                existing_data = existing_schedule.schedule_data or {}
+                if existing_data.get("day") != day:
                     continue
-                
-                existing_periods = schedule.schedule_data.get(day, [])
-                if not existing_periods:
-                    continue
-                
-                # Convert period strings to sets of period numbers
-                new_period_set = set()
-                for period_range in new_periods:
-                    start, end = map(int, period_range.split('-'))
-                    new_period_set.update(range(start, end + 1))
-                
-                existing_period_set = set()
-                for period_range in existing_periods:
-                    start, end = map(int, period_range.split('-'))
-                    existing_period_set.update(range(start, end + 1))
-                
-                # Check for overlap
-                overlap = new_period_set & existing_period_set
-                if overlap:
-                    conflict_periods = sorted(list(overlap))
+
+                existing_periods = existing_data.get("periods", [])
+                if TeacherClassService._periods_overlap(new_periods, existing_periods):
+                    conflict_periods = sorted(list(set(new_periods) & set(existing_periods)))
+                    day_names = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"]
+                    day_name = day_names[day] if 0 <= day <= 6 else f"Day {day}"
+
                     return (
                         True,
-                        f"Schedule conflict on {day.capitalize()} with class '{cls.class_name}' "
-                        f"(Code: {cls.class_code}). Overlapping periods: {conflict_periods}"
+                        f"Schedule conflict on {day_name} with class '{existing_schedule.class_rel.class_name}' "
+                        f"(Code: {existing_schedule.class_rel.class_code}). Overlapping periods: {conflict_periods}"
                     )
-        
+
         return False, ""
-    
+
     @staticmethod
     def check_location_conflict(
         db: Session,
@@ -107,75 +155,45 @@ class TeacherClassService:
         new_schedule: Dict,
         exclude_class_id: Optional[int] = None
     ) -> tuple[bool, str]:
-        """
-        Check if location (room) is already occupied at the same time.
-        
-        Returns:
-            (has_conflict: bool, conflict_message: str)
-        """
+        """Check if a room is already occupied at the same time."""
         if not location:
             return False, ""
-        
-        # Get all active classes with same location
-        query = db.query(Class).filter(
-            Class.location == location,
+
+        query = db.query(ClassSchedule).join(Class).filter(
+            ClassSchedule.location == location,
             Class.is_active == True
         )
-        
-        # Exclude current class if updating
+
         if exclude_class_id:
             query = query.filter(Class.id != exclude_class_id)
-        
-        existing_classes = query.all()
-        
-        # Check each existing class schedule
-        for cls in existing_classes:
-            schedule = db.query(ClassSchedule).filter(
-                ClassSchedule.class_id == cls.id
-            ).first()
-            
-            if not schedule or not schedule.schedule_data:
-                continue
-            
-            # Check for conflicts day by day
-            for day, new_periods in new_schedule.items():
-                if not new_periods:
+
+        existing_schedules = query.all()
+        new_schedules = TeacherClassService._normalize_schedule_entries(new_schedule)
+
+        for new_day_schedule in new_schedules:
+            day = new_day_schedule["day"]
+            new_periods = new_day_schedule["periods"]
+
+            for existing_schedule in existing_schedules:
+                existing_data = existing_schedule.schedule_data or {}
+                if existing_data.get("day") != day:
                     continue
-                
-                existing_periods = schedule.schedule_data.get(day, [])
-                if not existing_periods:
-                    continue
-                
-                # Convert period strings to sets of period numbers
-                new_period_set = set()
-                for period_range in new_periods:
-                    start, end = map(int, period_range.split('-'))
-                    new_period_set.update(range(start, end + 1))
-                
-                existing_period_set = set()
-                for period_range in existing_periods:
-                    start, end = map(int, period_range.split('-'))
-                    existing_period_set.update(range(start, end + 1))
-                
-                # Check for overlap
-                overlap = new_period_set & existing_period_set
-                if overlap:
-                    conflict_periods = sorted(list(overlap))
-                    
-                    # Get teacher name
-                    teacher = db.query(Teacher).filter(Teacher.id == cls.teacher_id).first()
-                    teacher_user = db.query(User).filter(User.id == teacher.user_id).first() if teacher else None
-                    teacher_name = teacher_user.full_name if teacher_user else "Unknown"
-                    
+
+                existing_periods = existing_data.get("periods", [])
+                if TeacherClassService._periods_overlap(new_periods, existing_periods):
+                    conflict_periods = sorted(list(set(new_periods) & set(existing_periods)))
+                    day_names = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"]
+                    day_name = day_names[day] if 0 <= day <= 6 else f"Day {day}"
+
                     return (
                         True,
-                        f"Room '{location}' is already occupied on {day.capitalize()} "
-                        f"by class '{cls.class_name}' (Teacher: {teacher_name}, Code: {cls.class_code}). "
+                        f"Room '{location}' is already occupied on {day_name} by class '{existing_schedule.class_rel.class_name}' (Code: {existing_schedule.class_rel.class_code}). "
                         f"Overlapping periods: {conflict_periods}"
                     )
         
         return False, ""
     
+
     @staticmethod
     async def create_class(db: Session, user, payload: CreateClassRequest) -> Dict:
         """
@@ -183,7 +201,7 @@ class TeacherClassService:
         
         Models used:
         - Class: class_name, class_code, teacher_id, description, location, is_active
-        - ClassSchedule: class_id, schedule_data (JSON)
+        - ClassSchedule: class_id, schedule_data (JSON), location (FK rooms.name)
         """
         
         # Verify teacher exists
@@ -202,58 +220,81 @@ class TeacherClassService:
             )
         
         # Check for schedule conflicts
-        if payload.schedule:
-            schedule_dict = payload.schedule.model_dump(exclude_none=True)
-            schedule_dict = {k: v for k, v in schedule_dict.items() if v}
-            
-            if schedule_dict:
-                # Check teacher schedule conflict
-                has_conflict, conflict_msg = TeacherClassService.check_schedule_conflict(
-                    db, teacher.id, schedule_dict
+        schedule_entries = TeacherClassService._normalize_schedule_entries(payload.schedule.model_dump(exclude_none=True)) if payload.schedule else []
+
+        for entry in schedule_entries:
+            location = entry.get("location")
+            if not location:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="Each schedule entry must include a location"
+                )
+
+            room_exists = db.query(Room).filter(Room.name == location, Room.status == "active").first()
+            if not room_exists:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=f"Room '{location}' does not exist or is inactive"
+                )
+
+        if schedule_entries:
+            has_conflict, conflict_msg = TeacherClassService.check_schedule_conflict(
+                db, teacher.id, {"schedules": schedule_entries}
+            )
+            if has_conflict:
+                raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=conflict_msg)
+
+            for entry in schedule_entries:
+                has_conflict, conflict_msg = TeacherClassService.check_location_conflict(
+                    db, entry["location"], {"schedules": [entry]}
                 )
                 if has_conflict:
-                    raise HTTPException(
-                        status_code=status.HTTP_400_BAD_REQUEST,
-                        detail=conflict_msg
-                    )
-                
-                # Check location conflict
-                if payload.location:
-                    has_conflict, conflict_msg = TeacherClassService.check_location_conflict(
-                        db, payload.location, schedule_dict
-                    )
-                    if has_conflict:
-                        raise HTTPException(
-                            status_code=status.HTTP_400_BAD_REQUEST,
-                            detail=conflict_msg
-                        )
+                    raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=conflict_msg)
         
         # Generate unique random class_code (9 chars: letters + numbers)
         class_code = TeacherClassService.generate_class_code(db, max_length=9)
         
+        course_uuid = None
+        if payload.course_id:
+            from uuid import UUID
+            try:
+                course_uuid = UUID(payload.course_id)
+            except ValueError:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="course_id must be a valid UUID"
+                )
+
+            course = db.query(Course).filter(
+                Course.id == course_uuid,
+                Course.teacher_id == teacher.id
+            ).first()
+            if not course:
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail="Course not found or not owned by teacher"
+                )
+
         # Create Class record
         new_class = Class(
             class_name=payload.class_name,
             class_code=class_code,
             teacher_id=payload.teacher_id,
+            course_id=course_uuid,
             description=payload.description,
-            location=payload.location,
             is_active=True
         )
         db.add(new_class)
         db.flush()
         
-        # Create ClassSchedule if provided
-        if payload.schedule:
-            schedule_dict = payload.schedule.model_dump(exclude_none=True)
-            schedule_dict = {k: v for k, v in schedule_dict.items() if v}
-            
-            if schedule_dict:
-                class_schedule = ClassSchedule(
-                    class_id=new_class.id,
-                    schedule_data=schedule_dict
-                )
-                db.add(class_schedule)
+        # Create one ClassSchedule row per session/day
+        for entry in schedule_entries:
+            class_schedule = ClassSchedule(
+                class_id=new_class.id,
+                schedule_data={"day": entry["day"], "periods": entry["periods"]},
+                location=entry["location"]
+            )
+            db.add(class_schedule)
         
         db.commit()
         db.refresh(new_class)
@@ -311,13 +352,11 @@ class TeacherClassService:
         # Build response
         classes_data = []
         for cls in classes:
-            # Get schedule from ClassSchedule
-            schedule_data = None
-            schedule = db.query(ClassSchedule).filter(
+            # Get schedules from ClassSchedule rows
+            schedule_rows = db.query(ClassSchedule).filter(
                 ClassSchedule.class_id == cls.id
-            ).first()
-            if schedule:
-                schedule_data = schedule.schedule_data
+            ).all()
+            schedule_data = TeacherClassService._build_schedule_model(schedule_rows) if schedule_rows else None
             
             # Count students from ClassMember
             student_count = db.query(ClassMember).filter(
@@ -327,7 +366,7 @@ class TeacherClassService:
             classes_data.append({
                 "id": cls.id,
                 "name": cls.class_name,
-                "location": cls.location,
+                "subject": cls.class_name,
                 "status": "active" if cls.is_active else "inactive",
                 "classCode": cls.class_code,
                 "studentCount": student_count,
@@ -378,15 +417,11 @@ class TeacherClassService:
         # Get teacher user info
         teacher_user = db.query(User).filter(User.id == user.id).first()
         
-        # Get ClassSchedule
-        schedule = db.query(ClassSchedule).filter(
+        # Get ClassSchedule rows and aggregate into ScheduleModel
+        schedule_rows = db.query(ClassSchedule).filter(
             ClassSchedule.class_id == cls.id
-        ).first()
-        
-        # Return schedule_data as ScheduleModel (dict) instead of string
-        schedule_data = None
-        if schedule and schedule.schedule_data:
-            schedule_data = schedule.schedule_data
+        ).all()
+        schedule_data = TeacherClassService._build_schedule_model(schedule_rows) if schedule_rows else None
         
         # Get ClassMember -> Student -> User
         members = db.query(ClassMember).filter(
@@ -427,10 +462,10 @@ class TeacherClassService:
                     "teacherId": teacher_user.id,
                     "students": len(students_data),
                     "maxStudents": 30,
-                    "schedule": schedule_data,  # ✅ Return ScheduleModel (dict) instead of string
-                    "room": cls.location,
+                    "schedule": schedule_data,
                     "status": "active" if cls.is_active else "inactive",
                     "classCode": cls.class_code,
+                    "courseId": str(cls.course_id) if cls.course_id else None,
                     "description": cls.description
                 },
                 "students": students_data,
@@ -469,72 +504,68 @@ class TeacherClassService:
                 detail="Class not found"
             )
         
-        # Get current schedule for conflict checking
-        current_schedule = db.query(ClassSchedule).filter(
+        # Get current schedule rows for conflict checking
+        schedule_rows = db.query(ClassSchedule).filter(
             ClassSchedule.class_id == cls.id
-        ).first()
-        
-        check_schedule = None
+        ).all()
+
         if payload.schedule is not None:
-            schedule_dict = payload.schedule.model_dump(exclude_none=True)
-            check_schedule = {k: v for k, v in schedule_dict.items() if v}
-        elif current_schedule:
-            check_schedule = current_schedule.schedule_data
-        
-        # Check conflicts if schedule or location is being updated
-        if check_schedule:
-            # Check teacher schedule conflict
+            new_schedule_entries = TeacherClassService._normalize_schedule_entries(
+                payload.schedule.model_dump(exclude_none=True)
+            )
+        else:
+            new_schedule_entries = [
+                {
+                    "day": (row.schedule_data or {}).get("day"),
+                    "periods": (row.schedule_data or {}).get("periods", []),
+                    "location": row.location,
+                }
+                for row in schedule_rows
+                if (row.schedule_data or {}).get("day") is not None
+            ]
+
+        if new_schedule_entries:
             has_conflict, conflict_msg = TeacherClassService.check_schedule_conflict(
-                db, teacher.id, check_schedule, exclude_class_id=class_id
+                db, teacher.id, {"schedules": new_schedule_entries}, exclude_class_id=class_id
             )
             if has_conflict:
-                raise HTTPException(
-                    status_code=status.HTTP_400_BAD_REQUEST,
-                    detail=conflict_msg
-                )
-            
-            # Check location conflict
-            location_to_check = payload.location if payload.location is not None else cls.location
-            if location_to_check:
+                raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=conflict_msg)
+
+            for entry in new_schedule_entries:
+                location = entry.get("location")
+                if not location:
+                    raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Each schedule entry must include a location")
+
+                room_exists = db.query(Room).filter(Room.name == location, Room.status == "active").first()
+                if not room_exists:
+                    raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"Room '{location}' does not exist or is inactive")
+
                 has_conflict, conflict_msg = TeacherClassService.check_location_conflict(
-                    db, location_to_check, check_schedule, exclude_class_id=class_id
+                    db, location, {"schedules": [entry]}, exclude_class_id=class_id
                 )
                 if has_conflict:
-                    raise HTTPException(
-                        status_code=status.HTTP_400_BAD_REQUEST,
-                        detail=conflict_msg
-                    )
+                    raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=conflict_msg)
         
         # Update Class fields
         if payload.class_name is not None:
             cls.class_name = payload.class_name
-        if payload.location is not None:
-            cls.location = payload.location
         if payload.description is not None:
             cls.description = payload.description
+
         if payload.is_active is not None:
             cls.is_active = payload.is_active
         
         cls.updated_at = datetime.utcnow()
         
-        # Update ClassSchedule
+        # Update ClassSchedule rows
         if payload.schedule is not None:
-            schedule = db.query(ClassSchedule).filter(
-                ClassSchedule.class_id == cls.id
-            ).first()
-            
-            schedule_dict = payload.schedule.model_dump(exclude_none=True)
-            schedule_dict = {k: v for k, v in schedule_dict.items() if v}
-            
-            if schedule:
-                schedule.schedule_data = schedule_dict
-                schedule.updated_at = datetime.utcnow()
-            elif schedule_dict:
-                new_schedule = ClassSchedule(
+            db.query(ClassSchedule).filter(ClassSchedule.class_id == cls.id).delete(synchronize_session=False)
+            for entry in new_schedule_entries:
+                db.add(ClassSchedule(
                     class_id=cls.id,
-                    schedule_data=schedule_dict
-                )
-                db.add(new_schedule)
+                    schedule_data={"day": entry["day"], "periods": entry["periods"]},
+                    location=entry["location"]
+                ))
         
         db.commit()
         db.refresh(cls)
@@ -549,6 +580,46 @@ class TeacherClassService:
                 }
             },
             "message": "Class updated successfully"
+        }
+
+    @staticmethod
+    async def update_class_course(db: Session, user, class_id: int, payload: any) -> Dict:
+        """Update the course of a class."""
+        teacher = db.query(Teacher).filter(Teacher.user_id == user.id).first()
+        if not teacher:
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Only teachers can update classes")
+        
+        cls = db.query(Class).filter(Class.id == class_id, Class.teacher_id == teacher.id).first()
+        if not cls:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Class not found")
+            
+        if payload.course_id == "":
+            cls.course_id = None
+        else:
+            from uuid import UUID
+            try:
+                course_uuid = UUID(payload.course_id)
+            except ValueError:
+                raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid course UUID")
+            course = db.query(Course).filter(Course.id == course_uuid, Course.teacher_id == teacher.id).first()
+            if not course:
+                raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Course not found or not owned by teacher")
+            cls.course_id = course_uuid
+            
+        cls.updated_at = datetime.utcnow()
+        db.commit()
+        db.refresh(cls)
+        
+        return {
+            "success": True,
+            "data": {
+                "class": {
+                    "id": cls.id,
+                    "courseId": str(cls.course_id) if cls.course_id else None,
+                    "updatedAt": cls.updated_at.isoformat() + "Z"
+                }
+            },
+            "message": "Class course updated successfully"
         }
     
     @staticmethod
@@ -582,6 +653,39 @@ class TeacherClassService:
         return {
             "success": True,
             "message": "Class deactivated successfully"
+        }
+
+    @staticmethod
+    async def restore_class(db: Session, user, class_id: int) -> Dict:
+        """Restore - set is_active=True."""
+        
+        teacher = db.query(Teacher).filter(Teacher.user_id == user.id).first()
+        if not teacher:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Only teachers can restore classes"
+            )
+        
+        cls = db.query(Class).filter(
+            Class.id == class_id,
+            Class.teacher_id == teacher.id
+        ).first()
+        
+        if not cls:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Class not found"
+            )
+        
+        # Restore
+        cls.is_active = True
+        cls.updated_at = datetime.utcnow()
+        
+        db.commit()
+        
+        return {
+            "success": True,
+            "message": "Class reactivated successfully"
         }
     
     @staticmethod

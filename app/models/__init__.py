@@ -37,6 +37,7 @@ from app.models.system_log import SystemLog
 from app.models.ai_training_job import AITrainingJob
 from app.models.chat_session import ChatSession
 from app.models.chat_message import ChatMessage
+from app.models.room import Room
 
 __all__ = [
     "Base",
@@ -76,4 +77,5 @@ __all__ = [
     "AITrainingJob",
     "ChatSession",
     "ChatMessage",
+    "Room",
 ]
