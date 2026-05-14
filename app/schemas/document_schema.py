@@ -8,6 +8,7 @@ class ClassDocumentItemResponse(BaseModel):
     file_url: Optional[str] = Field(None, description="URL to access or download the document")
     created_at: str = Field(..., description="ISO timestamp of when it was uploaded")
     is_private: bool = Field(..., description="True if document belongs exclusively to this class, False if it belongs to the whole course")
+    is_embedding: bool = Field(True, description="True if the document has been indexed for RAG chat")
 
 class ClassDocumentListResponse(BaseModel):
     """Schema for a list of class documents."""

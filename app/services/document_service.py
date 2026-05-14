@@ -2,6 +2,7 @@
 from sqlalchemy.orm import Session
 from sqlalchemy import or_
 from fastapi import HTTPException, status
+import uuid
 
 from app.models.document import Document
 from app.models.class_model import Class
@@ -67,7 +68,8 @@ class DocumentService:
                 "title": doc.title,
                 "file_url": DocumentService._resolve_document_file_url(str(doc.id), doc.file_url),
                 "created_at": doc.uploaded_at.isoformat() + "Z" if doc.uploaded_at.tzinfo is None else doc.uploaded_at.isoformat(),
-                "is_private": is_private
+                "is_private": is_private,
+                "is_embedding": doc.is_embedding,
             })
             
         return {
@@ -75,3 +77,41 @@ class DocumentService:
             "data": response_data,
             "message": "Documents retrieved successfully"
         }
+
+    @staticmethod
+    def validate_rag_documents(db: Session, current_user: User, class_id: int, document_ids: list[str]) -> list[str]:
+        """Ensure selected RAG documents belong to the class context and are embeddable."""
+        if not document_ids:
+            raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="document_ids cannot be empty")
+
+        class_obj = DocumentService._ensure_can_access_class_documents(db, current_user, class_id)
+
+        try:
+            requested_ids = [uuid.UUID(str(doc_id)) for doc_id in document_ids]
+        except ValueError:
+            raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Invalid document id")
+
+        allowed_conditions = [Document.only_class_id == class_id]
+        if class_obj.course_id:
+            allowed_conditions.append(
+                (Document.course_id == class_obj.course_id) & (Document.only_class_id.is_(None))
+            )
+
+        documents = (
+            db.query(Document)
+            .filter(
+                Document.id.in_(requested_ids),
+                Document.is_embedding.is_(True),
+                or_(*allowed_conditions),
+            )
+            .all()
+        )
+
+        allowed_ids = {doc.id for doc in documents}
+        if len(allowed_ids) != len(set(requested_ids)):
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="One or more documents are not available for RAG in this class",
+            )
+
+        return [str(doc_id) for doc_id in requested_ids]

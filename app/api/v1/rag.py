@@ -1,18 +1,12 @@
-"""
-RAG Chat Proxy – Backend router
-Forwards /rag/chat (SSE stream) and /rag/chat/history to AI Service.
-Frontend talks to Backend; Backend forwards with the internal callback secret.
-"""
-from __future__ import annotations
-
 import logging
-from typing import AsyncGenerator
+from typing import AsyncGenerator, List
 
 import httpx
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends
 from fastapi.responses import StreamingResponse
-from pydantic import BaseModel
+from sqlalchemy.orm import Session
 
+from app.core.database import get_db
 from app.core.config import settings
 from app.core.dependencies import get_current_user
 from app.models.user import User
@@ -22,38 +16,31 @@ router = APIRouter(prefix="/rag", tags=["RAG"])
 
 _AI_BASE = settings.AI_SERVICE_URL.rstrip("/") + "/api/v1/rag"
 
-
-def _ai_headers(token: str) -> dict:
-    """Headers passed to AI Service: Backend JWT for auth + callback secret."""
-    return {
-        "Authorization": f"Bearer {token}",
-        "X-Callback-Secret": settings.AI_SERVICE_SECRET,
-        "Content-Type": "application/json",
-    }
-
-
 # ---------------------------------------------------------------------------
 # POST /rag/chat  – streaming proxy
 # ---------------------------------------------------------------------------
-
-class ChatRequest(BaseModel):
-    class_id: int
-    question: str
-    document_ids: list[str]
+from app.schemas.rag_schema import ChatRequest, ChatSaveRequest, ChatMessageResponse
+from app.services.rag_service import RAGService
+from app.services.document_service import DocumentService
 
 
 @router.post("/chat")
 async def proxy_chat(
     body: ChatRequest,
-    request: Request,
+    db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
     """
     Proxy SSE stream from AI Service back to the browser.
-    Re-uses the user's JWT from the Authorization header.
     """
-    # Forward the original Bearer token to AI Service so it can decode user_id
-    auth_header = request.headers.get("Authorization", "")
+    validated_document_ids = DocumentService.validate_rag_documents(
+        db=db,
+        current_user=current_user,
+        class_id=body.class_id,
+        document_ids=body.document_ids,
+    )
+    ai_payload = body.model_dump()
+    ai_payload["document_ids"] = validated_document_ids
 
     async def _stream() -> AsyncGenerator[bytes, None]:
         async with httpx.AsyncClient(timeout=None) as client:
@@ -62,10 +49,9 @@ async def proxy_chat(
                     "POST",
                     f"{_AI_BASE}/chat",
                     headers={
-                        "Authorization": auth_header,
                         "Content-Type": "application/json",
                     },
-                    json=body.model_dump(),
+                    json=ai_payload,
                 ) as resp:
                     if resp.status_code != 200:
                         error_text = await resp.aread()
@@ -91,27 +77,33 @@ async def proxy_chat(
 
 
 # ---------------------------------------------------------------------------
+# POST /rag/chat/save – Save chat history to Backend DB
+# ---------------------------------------------------------------------------
+
+@router.post("/chat/save")
+async def save_chat_message(
+    body: ChatSaveRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Save a question-answer pair to the database."""
+    session_id = RAGService.save_chat_message(db, current_user, body)
+    return {"success": True, "session_id": session_id}
+
+
+# ---------------------------------------------------------------------------
 # GET /rag/chat/history
 # ---------------------------------------------------------------------------
 
-@router.get("/chat/history")
-async def proxy_history(
+@router.get("/chat/history", response_model=List[ChatMessageResponse])
+async def get_chat_history(
     class_id: int,
-    request: Request,
+    limit: int = 20,
+    db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    auth_header = request.headers.get("Authorization", "")
-    async with httpx.AsyncClient(timeout=30) as client:
-        try:
-            resp = await client.get(
-                f"{_AI_BASE}/chat/history",
-                params={"class_id": class_id},
-                headers={"Authorization": auth_header},
-            )
-            return resp.json()
-        except Exception as e:
-            logger.error(f"History proxy error: {e}")
-            raise HTTPException(status_code=502, detail="Could not reach AI Service")
+    """Get chat history from Backend DB."""
+    return RAGService.get_chat_history(db, current_user, class_id, limit)
 
 
 # ---------------------------------------------------------------------------
@@ -119,20 +111,11 @@ async def proxy_history(
 # ---------------------------------------------------------------------------
 
 @router.delete("/chat/history")
-async def proxy_clear_history(
+async def clear_chat_history(
     class_id: int,
-    request: Request,
+    db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    auth_header = request.headers.get("Authorization", "")
-    async with httpx.AsyncClient(timeout=30) as client:
-        try:
-            resp = await client.delete(
-                f"{_AI_BASE}/chat/history",
-                params={"class_id": class_id},
-                headers={"Authorization": auth_header},
-            )
-            return resp.json()
-        except Exception as e:
-            logger.error(f"Clear history proxy error: {e}")
-            raise HTTPException(status_code=502, detail="Could not reach AI Service")
+    """Clear history by deleting the session."""
+    RAGService.clear_chat_history(db, current_user, class_id)
+    return {"success": True}
