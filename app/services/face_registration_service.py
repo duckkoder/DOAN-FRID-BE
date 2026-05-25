@@ -711,6 +711,16 @@ class FaceRegistrationDBService:
         if note:
             registration.note = (registration.note or "") + f"\nAdmin note: {note}"
         
+        # ✅ Set student verification status to False and delete their face embeddings
+        student = registration.student
+        if student:
+            student.is_verified = False
+            logger.info(f"Student {student.id} ({student.student_code}) marked as unverified due to registration rejection")
+            
+            # Delete face embeddings
+            from app.services.face_embedding_service import FaceEmbeddingService
+            FaceEmbeddingService.delete_student_embeddings(self.db, student.id)
+        
         self.db.commit()
         self.db.refresh(registration)
         

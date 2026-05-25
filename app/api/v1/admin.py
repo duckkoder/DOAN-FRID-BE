@@ -518,6 +518,9 @@ async def approve_face_registration(
         # 3. Save embeddings to database
         embeddings_data = embedding_result.get("embeddings", [])
         
+        # Delete old embeddings first to avoid duplicate/conflicting embeddings
+        FaceEmbeddingService.delete_student_embeddings(db, reg.student_id)
+        
         face_embeddings = FaceEmbeddingService.create_embeddings_batch(
             db=db,
             student_id=reg.student_id,

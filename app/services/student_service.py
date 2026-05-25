@@ -217,6 +217,33 @@ class StudentService:
         
         for field, value in update_dict.items():
             if field in ['department_id', 'academic_year', 'date_of_birth', 'is_verified']:
+                if field == 'is_verified':
+                    if value == True and student.is_verified == False:
+                        raise HTTPException(
+                            status_code=status.HTTP_400_BAD_REQUEST,
+                            detail="Không thể tự ý xác minh sinh viên. Phải duyệt đơn đăng ký khuôn mặt để tạo embedding."
+                        )
+                    elif value == False and student.is_verified == True:
+                        # ✅ Student is being manually unverified by admin
+                        # 1. Delete face embeddings
+                        from app.services.face_embedding_service import FaceEmbeddingService
+                        FaceEmbeddingService.delete_student_embeddings(db, student.id)
+                        
+                        # 2. Update latest approved registration request to 'rejected'
+                        from app.models.face_registration_request import FaceRegistrationRequest
+                        latest_approved = (
+                            db.query(FaceRegistrationRequest)
+                            .filter(
+                                FaceRegistrationRequest.student_id == student.id,
+                                FaceRegistrationRequest.status == "approved"
+                            )
+                            .order_by(FaceRegistrationRequest.created_at.desc())
+                            .first()
+                        )
+                        if latest_approved:
+                            latest_approved.status = "rejected"
+                            latest_approved.rejection_reason = "Manual de-verification by Administrator"
+                
                 setattr(student, field, value)
             elif field in ['phone', 'avatar_url', 'is_active']:
                 setattr(user, field, value)

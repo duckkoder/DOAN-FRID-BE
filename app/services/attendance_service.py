@@ -13,6 +13,7 @@ VIETNAM_TZ = ZoneInfo('Asia/Ho_Chi_Minh')
 
 from app.models.user import User
 from app.models.class_model import Class
+from app.models.class_schedule import ClassSchedule
 from app.models.teacher import Teacher
 from app.models.class_member import ClassMember
 from app.models.attendance_session import AttendanceSession
@@ -40,6 +41,51 @@ class AttendanceService:
     
     def __init__(self, db: Session):
         self.db = db
+
+    def _extract_period_numbers(self, period_range: Optional[str]) -> List[int]:
+        if not period_range:
+            return []
+
+        import re
+
+        numbers = [int(value) for value in re.findall(r"\d+", period_range)]
+        if len(numbers) >= 2:
+            return list(range(numbers[0], numbers[-1] + 1))
+        return numbers
+
+    def _resolve_session_location(self, request: StartSessionRequest) -> Optional[str]:
+        if request.location and request.location.strip().lower() not in {"classroom", "class room", "n/a"}:
+            return request.location.strip()
+
+        schedule_rows = self.db.query(ClassSchedule).filter(
+            ClassSchedule.class_id == request.class_id
+        ).order_by(ClassSchedule.id.asc()).all()
+        if not schedule_rows:
+            return None
+
+        target_periods = self._extract_period_numbers(request.period_range)
+        same_day_rows = []
+
+        for row in schedule_rows:
+            schedule_data = row.schedule_data or {}
+            if schedule_data.get("day") == request.day_of_week:
+                same_day_rows.append(row)
+                row_periods = schedule_data.get("periods") or []
+                if target_periods and row_periods == target_periods:
+                    return row.location
+
+        if request.session_index is not None:
+            all_rows = sorted(
+                schedule_rows,
+                key=lambda item: ((item.schedule_data or {}).get("day", 0), item.id)
+            )
+            if 0 <= request.session_index < len(all_rows):
+                return all_rows[request.session_index].location
+
+        if same_day_rows:
+            return same_day_rows[0].location
+
+        return schedule_rows[0].location
     
     async def start_session_with_ai(
         self, 
@@ -136,13 +182,15 @@ class AttendanceService:
         vietnam_now = datetime.now(VIETNAM_TZ)
         default_session_name = f"Điểm danh {vietnam_now.strftime('%d/%m/%Y %H:%M')}"
         
+        session_location = self._resolve_session_location(request)
+
         new_session = AttendanceSession(
             class_id=request.class_id,
             session_name=request.session_name or default_session_name,
             start_time=vietnam_now,
             status=SessionStatus.SCHEDULED.value,  # Scheduled cho đến khi AI-Service confirm
             late_threshold_minutes=request.late_threshold_minutes,
-            location=request.location,
+            location=session_location,
             allow_late_checkin=True,
             day_of_week=request.day_of_week,
             period_range=request.period_range,
@@ -1232,3 +1280,67 @@ class AttendanceService:
             logger.error(f"Error in _fetch_and_upload_spoof_images: {e}")
             raise
 
+    def get_student_face_image_by_record(self, record_id: int, current_user: User) -> str:
+        """
+        Lấy ảnh trực diện của sinh viên từ bản ghi điểm danh (presigned S3 URL).
+        """
+        if current_user.role not in ["teacher", "admin"]:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Quyền truy cập bị từ chối. Chỉ Giáo viên hoặc Admin."
+            )
+
+        from app.models.attendance_record import AttendanceRecord
+        from app.models.face_registration_request import FaceRegistrationRequest
+        from app.services.s3_service import s3_service
+
+        # Lấy bản ghi điểm danh
+        record = self.db.query(AttendanceRecord).filter(AttendanceRecord.id == record_id).first()
+        if not record:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Không tìm thấy bản ghi điểm danh."
+            )
+
+        # Tìm đơn đăng ký khuôn mặt approved của sinh viên đó
+        reg = (
+            self.db.query(FaceRegistrationRequest)
+            .filter(
+                FaceRegistrationRequest.student_id == record.student_id,
+                FaceRegistrationRequest.status == "approved"
+            )
+            .order_by(FaceRegistrationRequest.created_at.desc())
+            .first()
+        )
+
+        if not reg:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Sinh viên này chưa có đăng ký khuôn mặt được duyệt."
+            )
+
+        # Lấy file ảnh trực diện
+        file_key = None
+        if reg.evidence_file:
+            file_key = reg.evidence_file.file_key
+        elif reg.verification_data and "steps" in reg.verification_data:
+            # Fallback tìm trong verification_data JSON
+            for step in reg.verification_data["steps"]:
+                if step.get("step_name") == "face_front" or step.get("step") == "face_front":
+                    file_key = step.get("s3_key")
+                    break
+
+        if not file_key:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Không tìm thấy ảnh trực diện của sinh viên."
+            )
+
+        try:
+            presigned_url = s3_service.get_presigned_url(file_key, expires_in=3600)
+            return presigned_url
+        except Exception as e:
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=f"Lỗi tạo link ảnh S3: {str(e)}"
+            )

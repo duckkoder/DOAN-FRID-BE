@@ -626,6 +626,55 @@ class ClassPostService:
         }
 
     @staticmethod
+    async def list_post_reactions(db: Session, current_user: User, post_id: int) -> dict[str, Any]:
+        post = db.query(ClassPost).filter(ClassPost.id == post_id).first()
+        if not post:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Post not found")
+
+        ClassPostService._ensure_user_can_view_class(db, current_user, post.class_id)
+
+        post_reactions = (
+            db.query(PostReaction)
+            .filter(PostReaction.post_id == post.id)
+            .order_by(PostReaction.created_at.desc())
+            .all()
+        )
+
+        items: list[dict[str, Any]] = []
+        for reaction in post_reactions:
+            if reaction.teacher_id:
+                teacher = db.query(Teacher).filter(Teacher.id == reaction.teacher_id).first()
+                profile = ClassPostService._build_teacher_profile(teacher)
+                role = "teacher"
+            else:
+                student = db.query(Student).filter(Student.id == reaction.student_id).first()
+                profile = ClassPostService._build_student_profile(student)
+                role = "student"
+
+            if not profile:
+                continue
+
+            items.append(
+                {
+                    "id": reaction.id,
+                    "emoji": reaction.emoji,
+                    "createdAt": reaction.created_at.isoformat(),
+                    "actorRole": role,
+                    "actorProfile": profile,
+                }
+            )
+
+        return {
+            "success": True,
+            "data": {
+                "postId": post.id,
+                "total": len(items),
+                "byEmoji": dict(Counter(item["emoji"] for item in items)),
+                "items": items,
+            },
+        }
+
+    @staticmethod
     async def remove_reaction(db: Session, current_user: User, post_id: int) -> dict[str, Any]:
         post = db.query(ClassPost).filter(ClassPost.id == post_id).first()
         if not post:

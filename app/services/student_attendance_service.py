@@ -8,6 +8,7 @@ from fastapi import HTTPException, status
 
 from app.models.attendance_record import AttendanceRecord
 from app.models.attendance_session import AttendanceSession
+from app.models.class_schedule import ClassSchedule
 from app.models.class_model import Class
 from app.models.class_member import ClassMember
 from app.models.student import Student
@@ -28,6 +29,51 @@ class StudentAttendanceService:
     def __init__(self, db: Session):
         self.db = db
         self.file_service = FileService(db)
+
+    def _extract_period_numbers(self, period_range: Optional[str]) -> List[int]:
+        if not period_range:
+            return []
+
+        import re
+
+        numbers = [int(value) for value in re.findall(r"\d+", period_range)]
+        if len(numbers) >= 2:
+            return list(range(numbers[0], numbers[-1] + 1))
+        return numbers
+
+    def _resolve_session_location(self, session: AttendanceSession) -> Optional[str]:
+        if session.location:
+            return session.location
+
+        schedule_rows = self.db.query(ClassSchedule).filter(
+            ClassSchedule.class_id == session.class_id
+        ).order_by(ClassSchedule.id.asc()).all()
+        if not schedule_rows:
+            return None
+
+        target_periods = self._extract_period_numbers(session.period_range)
+        same_day_rows = []
+
+        for row in schedule_rows:
+            schedule_data = row.schedule_data or {}
+            if schedule_data.get("day") == session.day_of_week:
+                same_day_rows.append(row)
+                row_periods = schedule_data.get("periods") or []
+                if target_periods and row_periods == target_periods:
+                    return row.location
+
+        if session.session_index is not None:
+            all_rows = sorted(
+                schedule_rows,
+                key=lambda item: ((item.schedule_data or {}).get("day", 0), item.id)
+            )
+            if 0 <= session.session_index < len(all_rows):
+                return all_rows[session.session_index].location
+
+        if same_day_rows:
+            return same_day_rows[0].location
+
+        return schedule_rows[0].location
 
     def _get_student_id_from_user_id(self, user_id: str) -> int:
         """Helper function to get student_id from user_id."""
@@ -84,6 +130,7 @@ class StudentAttendanceService:
         total_class_sessions = len(sessions)
 
         for session in sessions:
+            session_location = self._resolve_session_location(session)
             record = self.db.query(AttendanceRecord).filter(
                 AttendanceRecord.session_id == session.id,
                 AttendanceRecord.student_id == student_id
@@ -114,6 +161,7 @@ class StudentAttendanceService:
                 session_name=session.session_name,
                 start_time=session.start_time,
                 end_time=session.end_time,
+                location=session_location,
                 day_of_week=session.day_of_week,
                 period_range=session.period_range,
                 class_id=class_id,
@@ -190,6 +238,7 @@ class StudentAttendanceService:
             class_id=record.session.class_id,
             class_name=class_name,
             session_name=record.session.session_name,
+            location=self._resolve_session_location(record.session),
             start_time=record.session.start_time,
             end_time=record.session.end_time,
             student_id=record.student_id,

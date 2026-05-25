@@ -929,6 +929,119 @@ async def reject_attendance(
     )
 
 
+@router.post("/records/{record_id}/override", response_model=ConfirmAttendanceResponse)
+async def override_attendance(
+    record_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """
+    Giáo viên chỉnh sửa thủ công: chuyển ABSENT → PRESENT.
+
+    Dùng khi AI không nhận diện được nhưng sinh viên thực sự có mặt.
+    Không yêu cầu record phải ở trạng thái PENDING.
+    """
+    from app.core.enums import UserRole, AttendanceStatus
+    from app.models.teacher import Teacher
+    from app.models.class_model import Class
+    from datetime import datetime
+    from zoneinfo import ZoneInfo
+
+    VIETNAM_TZ = ZoneInfo('Asia/Ho_Chi_Minh')
+
+    if current_user.role != UserRole.TEACHER:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Chỉ giáo viên mới có thể chỉnh sửa điểm danh"
+        )
+
+    record = db.query(AttendanceRecord).filter(
+        AttendanceRecord.id == record_id
+    ).first()
+
+    if not record:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Không tìm thấy bản ghi điểm danh"
+        )
+
+    session = db.query(AttendanceSession).filter(
+        AttendanceSession.id == record.session_id
+    ).first()
+
+    teacher = db.query(Teacher).filter(Teacher.user_id == current_user.id).first()
+    class_obj = db.query(Class).filter(Class.id == session.class_id).first()
+
+    if not class_obj or class_obj.teacher_id != teacher.id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Bạn không có quyền với phiên này"
+        )
+
+    # Chỉ cho phép override ABSENT hoặc PENDING → PRESENT
+    if record.status not in (AttendanceStatus.ABSENT, AttendanceStatus.PENDING):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Chỉ có thể chỉnh sửa bản ghi ở trạng thái vắng mặt hoặc chờ (status: {record.status})"
+        )
+
+    record.status = AttendanceStatus.PRESENT
+    existing_notes = record.notes or ""
+    record.notes = f"{existing_notes} | Giáo viên chỉnh sửa thủ công (AI miss) lúc {datetime.now(VIETNAM_TZ).strftime('%H:%M %d/%m/%Y')}"
+    record.updated_at = datetime.now(VIETNAM_TZ)
+
+    db.commit()
+    db.refresh(record)
+
+    await manager.broadcast_to_session(
+        session.id,
+        {
+            "type": "confirmation_update",
+            "session_id": session.id,
+            "student_id": record.student_id,
+            "student_code": record.student.student_code,
+            "full_name": record.student.user.full_name,
+            "status": "present",
+            "confirmed_by": teacher.user.full_name,
+            "confirmed_at": datetime.now(VIETNAM_TZ).isoformat()
+        }
+    )
+
+    return ConfirmAttendanceResponse(
+        success=True,
+        record=AttendanceRecordDetail(
+            id=record.id,
+            session_id=record.session_id,
+            student_id=record.student_id,
+            student_code=record.student.student_code,
+            student_name=record.student.user.full_name,
+            status=record.status,
+            confidence_score=record.confidence_score,
+            recorded_at=record.recorded_at,
+            notes=record.notes
+        )
+    )
+
+@router.get(
+    "/records/{record_id}/student-face-image",
+    summary="Lấy ảnh khuôn mặt trực diện đã đăng ký của sinh viên",
+    description="Tạo pre-signed URL cho ảnh khuôn mặt trực diện (face_front) đã duyệt của sinh viên. Giáo viên/Admin chỉ định."
+)
+async def get_attendance_student_face_image(
+    record_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """
+    Lấy ảnh thẳng của sinh viên từ bản ghi điểm danh (presigned S3 URL).
+    """
+    service = AttendanceService(db)
+    image_url = service.get_student_face_image_by_record(record_id, current_user)
+    return {
+        "success": True,
+        "image_url": image_url
+    }
+
 @router.post("/sessions/{session_id}/confirm-all-pending", response_model=ConfirmAllPendingResponse)
 async def confirm_all_pending(
     session_id: int,

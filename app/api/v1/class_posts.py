@@ -123,6 +123,15 @@ async def react_to_post(
     )
 
 
+@router.get("/posts/{post_id}/reactions")
+async def list_post_reactions(
+    post_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    return await ClassPostService.list_post_reactions(db=db, current_user=current_user, post_id=post_id)
+
+
 @router.delete("/posts/{post_id}/reactions")
 async def remove_reaction(
     post_id: int,

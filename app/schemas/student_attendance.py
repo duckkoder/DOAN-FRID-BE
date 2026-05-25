@@ -18,6 +18,7 @@ class StudentAttendanceRecordDetailSchema(BaseModel):
     class_id: int = Field(..., description="ID of the class associated with the session.")
     class_name: str = Field(..., description="Name of the class associated with the session.")
     session_name: Optional[str] = Field(None, description="Name of the attendance session.")
+    location: Optional[str] = Field(None, description="Session location.")
     start_time: datetime = Field(..., description="Start time of the attendance session.")
     end_time: Optional[datetime] = Field(None, description="End time of the attendance session.")
     student_id: int
@@ -33,7 +34,8 @@ class StudentAttendanceSessionSummarySchema(BaseModel):
     session_name: Optional[str] = Field(None, description="Name of the attendance session.")
     start_time: datetime = Field(..., description="Start time of the attendance session.")
     end_time: Optional[datetime] = Field(None, description="End time of the attendance session.")
-    day_of_week: Optional[int] = Field(None, description="Day of week (0=Sunday, 1=Monday, ..., 6=Saturday).")
+    location: Optional[str] = Field(None, description="Session location.")
+    day_of_week: Optional[int] = Field(None, description="Day of week (0=Monday, ..., 6=Sunday).")
     period_range: Optional[str] = Field(None, description="Period range (e.g., '1-3' or '6-7').")
     class_id: int = Field(..., description="ID of the class associated with the session.")
     class_name: str = Field(..., description="Name of the class associated with the session.")
@@ -47,7 +49,7 @@ class StudentClassAttendanceSummary(BaseModel):
     """Summary of a student's attendance for a specific class."""
     class_id: int
     class_name: str
-    day_of_week: Optional[int] = Field(None, description="Day of week (0=Sunday, 1=Monday, ..., 6=Saturday).")
+    day_of_week: Optional[int] = Field(None, description="Day of week (0=Monday, ..., 6=Sunday).")
     period_range: Optional[str] = Field(None, description="Period range (e.g., '1-3' or '6-7').")
     total_sessions: int = Field(..., description="Total number of sessions for this class.")
     attended_sessions: int = Field(..., description="Total sessions where the student was marked 'present' or 'late'.")
