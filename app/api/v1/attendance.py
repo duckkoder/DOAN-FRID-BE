@@ -7,7 +7,9 @@ import json
 
 from app.core.database import get_db
 from app.core.dependencies import get_current_user
+from app.database.tenant_session import get_current_tenant, tenant_db_session_by_slug
 from app.models.user import User
+from app.platform.models.tenant import Tenant
 from app.models.attendance_session import AttendanceSession
 from app.models.attendance_record import AttendanceRecord
 from app.models.student import Student
@@ -91,15 +93,15 @@ background_tasks_set = set()
 
 # ============= Background Task Helper =============
 
-async def upload_images_background_task(session_id: int, ai_session_id: str):
+async def upload_images_background_task(session_id: int, ai_session_id: str, tenant_slug: str):
     """
     Background task để upload ảnh điểm danh từ AI Service lên S3.
     Chạy sau khi API đã trả về response để không block UI.
     """
     import logging
     import sys
-    from app.core.database import SessionLocal
     from app.services.attendance_service import AttendanceService
+    from app.services.ai_service_client import AIServiceClient
     
     # Configure logger với handler để đảm bảo output được hiển thị
     logger = logging.getLogger(__name__)
@@ -111,8 +113,7 @@ async def upload_images_background_task(session_id: int, ai_session_id: str):
         handler.setFormatter(formatter)
         logger.addHandler(handler)
     
-    db = SessionLocal()
-    try:
+    with tenant_db_session_by_slug(tenant_slug) as (db, _):
         service = AttendanceService(db)
         session = db.query(AttendanceSession).filter(
             AttendanceSession.id == session_id
@@ -133,16 +134,17 @@ async def upload_images_background_task(session_id: int, ai_session_id: str):
                 logger.error(f"Background: Failed to upload spoof images for session {session_id}: {e}")
             
             logger.info(f"Background: Completed all image uploads for session {session_id}")
+            try:
+                await AIServiceClient().delete_session(ai_session_id)
+                logger.info(f"Background: Deleted AI session {ai_session_id}")
+            except Exception as e:
+                logger.error(f"Background: Failed to delete AI session {ai_session_id}: {e}")
         else:
             logger.warning(f"Background: Session {session_id} not found")
             
-    except Exception as e:
-        error_msg = f"Background: Failed to upload images for session {session_id}: {e}"
-        logger.error(error_msg)
-        import traceback
-        traceback.print_exc()
-    finally:
-        db.close()
+        return
+
+    logger.error(f"Background: Failed to upload images for session {session_id}")
 
 
 # ============= REST API Endpoints =============
@@ -217,7 +219,8 @@ async def end_attendance_session(
     session_id: int,
     request: EndSessionRequest,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(get_current_user),
+    current_tenant: Tenant = Depends(get_current_tenant),
 ):
     """
     Kết thúc phiên điểm danh.
@@ -239,7 +242,8 @@ async def end_attendance_session(
         task = asyncio.create_task(
             upload_images_background_task(
                 session_id=session_id,
-                ai_session_id=result.session.ai_session_id
+                ai_session_id=result.session.ai_session_id,
+                tenant_slug=current_tenant.slug,
             )
         )
         # Giữ reference để task không bị garbage collected

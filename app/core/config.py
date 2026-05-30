@@ -6,7 +6,8 @@ import os
 from typing import Optional
 
 # ✅ Force load .env file
-env_path = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), '.env')
+project_root = os.path.dirname(os.path.dirname(os.path.dirname(__file__)))
+env_path = os.path.join(project_root, '.env')
 load_dotenv(env_path, override=True)
 
 
@@ -17,12 +18,22 @@ class Settings(BaseSettings):
     PROJECT_NAME: str = "AI Attendance System"
     VERSION: str = "1.0.0"
     API_V1_STR: str = "/api/v1"
-
-    # Database - ✅ Không có default value, bắt buộc phải có trong .env
-    DATABASE_URL: str = Field(..., description="PostgreSQL database URL")
+    PLATFORM_DATABASE_URL: str = Field(
+        default="postgresql://username:password@localhost:5432/platform_attandance_db",
+        description="PostgreSQL database URL for SaaS platform metadata",
+    )
+    TENANT_DB_HOST: str = Field(
+        default="localhost",
+        description="PostgreSQL host stored for newly created tenant databases",
+    )
+    TENANT_DB_PORT: int = Field(
+        default=5432,
+        description="PostgreSQL port stored for newly created tenant databases",
+    )
 
     # Security
     SECRET_KEY: str = "your-secret-key-here-change-in-production"
+    SECRET_ENCRYPTION_KEY: Optional[str] = None
     ALGORITHM: str = "HS256"
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 120
     REFRESH_TOKEN_EXPIRE_DAYS: int = 7
@@ -57,6 +68,8 @@ class Settings(BaseSettings):
     )
     AI_SERVICE_SECRET: str = "shared-secret-key-for-hmac-verification"  # Secret key for HMAC
     AI_WEBSOCKET_TOKEN_EXPIRE_MINUTES: int = 30  # WebSocket token expiry
+    ATTENDANCE_ALLOW_CREATE_ANYTIME: bool = False
+    ATTENDANCE_CREATE_WINDOW_GRACE_MINUTES: int = 0
     
     # ✅ AI Confidence Threshold cho teacher confirmation
     AI_CONFIDENCE_THRESHOLD: float = Field(

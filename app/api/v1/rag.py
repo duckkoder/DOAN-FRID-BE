@@ -10,6 +10,7 @@ from app.core.database import get_db
 from app.core.config import settings
 from app.core.dependencies import get_current_user
 from app.models.user import User
+from app.services.tenant_secret_service import TenantSecretService
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/rag", tags=["RAG"])
@@ -17,7 +18,7 @@ router = APIRouter(prefix="/rag", tags=["RAG"])
 _AI_BASE = settings.AI_SERVICE_URL.rstrip("/") + "/api/v1/rag"
 
 # ---------------------------------------------------------------------------
-# POST /rag/chat  – streaming proxy
+# POST /rag/chat - streaming proxy
 # ---------------------------------------------------------------------------
 from app.schemas.rag_schema import ChatRequest, ChatSaveRequest, ChatMessageResponse
 from app.services.rag_service import RAGService
@@ -39,8 +40,29 @@ async def proxy_chat(
         class_id=body.class_id,
         document_ids=body.document_ids,
     )
+    gemini_api_key = TenantSecretService.get_plain_secret(db, "gemini_api_key")
+    if not gemini_api_key:
+        async def _missing_key_stream() -> AsyncGenerator[bytes, None]:
+            yield "data: [ERROR] Tenant chua cau hinh Gemini API key. Admin can vao Cau hinh tich hop de luu key.\n\n".encode()
+            yield b"data: [DONE]\n\n"
+
+        return StreamingResponse(
+            _missing_key_stream(),
+            media_type="text/event-stream",
+            headers={
+                "Cache-Control": "no-cache",
+                "X-Accel-Buffering": "no",
+            },
+        )
+
     ai_payload = body.model_dump()
     ai_payload["document_ids"] = validated_document_ids
+    ai_payload["context_chunks"] = await DocumentService.get_rag_context_chunks(
+        db=db,
+        document_ids=validated_document_ids,
+        question=body.question,
+    )
+    ai_payload["gemini_api_key"] = gemini_api_key
 
     async def _stream() -> AsyncGenerator[bytes, None]:
         async with httpx.AsyncClient(timeout=None) as client:
@@ -77,7 +99,7 @@ async def proxy_chat(
 
 
 # ---------------------------------------------------------------------------
-# POST /rag/chat/save – Save chat history to Backend DB
+# POST /rag/chat/save - Save chat history to Backend DB
 # ---------------------------------------------------------------------------
 
 @router.post("/chat/save")

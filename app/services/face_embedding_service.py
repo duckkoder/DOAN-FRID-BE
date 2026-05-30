@@ -190,6 +190,41 @@ class FaceEmbeddingService:
             query = query.filter(FaceEmbedding.status == status)
         
         return query.order_by(FaceEmbedding.uploaded_at.desc()).all()
+
+    @staticmethod
+    def get_approved_embeddings_by_student_codes(
+        db: Session,
+        student_codes: List[str],
+    ) -> List[Dict[str, Any]]:
+        """Return approved embeddings for attendance session bootstrap."""
+        if not student_codes:
+            return []
+
+        embeddings = (
+            db.query(FaceEmbedding)
+            .filter(
+                FaceEmbedding.student_code.in_(student_codes),
+                FaceEmbedding.status == "approved",
+            )
+            .all()
+        )
+
+        result: List[Dict[str, Any]] = []
+        for item in embeddings:
+            vector = item.embedding
+            if hasattr(vector, "tolist"):
+                vector = vector.tolist()
+            elif not isinstance(vector, list):
+                vector = list(vector)
+
+            result.append({
+                "embedding_id": item.id,
+                "student_id": item.student_id,
+                "student_code": item.student_code,
+                "embedding": vector,
+            })
+
+        return result
     
     @staticmethod
     def count_student_embeddings(

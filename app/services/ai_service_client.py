@@ -1,8 +1,7 @@
-"""AI Service HTTP Client for communication with face recognition service."""
+﻿"""AI Service HTTP Client for communication with face recognition service."""
 import httpx
 import logging
 from typing import Dict, List, Optional, Any
-from datetime import datetime, timedelta
 from app.core.config import settings
 
 logger = logging.getLogger(__name__)
@@ -36,24 +35,25 @@ class AIServiceClient:
         backend_session_id: int,
         class_id: int,
         student_codes: List[str],
+        face_embeddings: List[Dict[str, Any]],
         ws_token: str,
         allowed_users: Optional[List[str]] = None
     ) -> Dict:
         """
-        Tạo session mới trong AI-Service.
+        Táº¡o session má»›i trong AI-Service.
         
         Args:
-            backend_session_id: ID của session trong backend DB
-            class_id: ID của lớp học
-            student_codes: Danh sách mã sinh viên
+            backend_session_id: ID cá»§a session trong backend DB
+            class_id: ID cá»§a lá»›p há»c
+            student_codes: Danh sÃ¡ch mÃ£ sinh viÃªn
             ws_token: JWT token cho WebSocket authentication
-            allowed_users: Danh sách user được phép (RBAC)
+            allowed_users: Danh sÃ¡ch user Ä‘Æ°á»£c phÃ©p (RBAC)
             
         Returns:
-            Dict chứa session_id, ws_url, expires_at
+            Dict chá»©a session_id, ws_url, expires_at
             
         Raises:
-            httpx.HTTPError: Nếu request thất bại
+            httpx.HTTPError: Náº¿u request tháº¥t báº¡i
         """
         url = f"{self.base_url}/api/v1/sessions"
         callback_url = f"{settings.BACKEND_BASE_URL}/api/v1/attendance/webhook/ai-recognition"
@@ -62,6 +62,7 @@ class AIServiceClient:
             "backend_session_id": backend_session_id,
             "class_id": str(class_id),
             "student_codes": student_codes,
+            "face_embeddings": face_embeddings,
             "backend_callback_url": callback_url,
             "ws_token": ws_token,
             "allowed_users": allowed_users or []
@@ -96,59 +97,18 @@ class AIServiceClient:
             )
             raise
     
-    async def end_session(self, ai_session_id: str) -> Dict:
-        """
-        Kết thúc session trong AI-Service.
-        
-        Args:
-            ai_session_id: ID của session trong AI-Service
-            
-        Returns:
-            Dict chứa status, statistics
-            
-        Raises:
-            httpx.HTTPError: Nếu request thất bại
-        """
-        url = f"{self.base_url}/api/v1/sessions/{ai_session_id}/end"
-        
-        try:
-            async with httpx.AsyncClient(timeout=self.timeout) as client:
-                response = await client.post(url)
-                response.raise_for_status()
-                data = response.json()
-                
-                logger.info(
-                    f"AI Session ended successfully",
-                    extra={
-                        "ai_session_id": ai_session_id,
-                        "statistics": data.get("statistics")
-                    }
-                )
-                
-                return data
-                
-        except httpx.HTTPError as e:
-            logger.error(
-                f"Failed to end AI session: {str(e)}",
-                extra={
-                    "ai_session_id": ai_session_id,
-                    "error": str(e)
-                }
-            )
-            raise
-    
     async def get_session_status(self, ai_session_id: str) -> Dict:
         """
-        Lấy trạng thái session từ AI-Service.
+        Láº¥y tráº¡ng thÃ¡i session tá»« AI-Service.
         
         Args:
-            ai_session_id: ID của session trong AI-Service
+            ai_session_id: ID cá»§a session trong AI-Service
             
         Returns:
-            Dict chứa status, statistics
+            Dict chá»©a status, statistics
             
         Raises:
-            httpx.HTTPError: Nếu request thất bại
+            httpx.HTTPError: Náº¿u request tháº¥t báº¡i
         """
         url = f"{self.base_url}/api/v1/sessions/{ai_session_id}"
         
@@ -167,27 +127,21 @@ class AIServiceClient:
                 }
             )
             raise
-    
-    async def health_check(self) -> Dict:
-        """
-        Kiểm tra health của AI-Service.
-        
-        Returns:
-            Dict chứa status, active_sessions, gpu info
-            
-        Raises:
-            httpx.HTTPError: Nếu service không available
-        """
-        url = f"{self.base_url}/api/v1/health"
-        
+
+    async def delete_session(self, ai_session_id: str) -> Dict:
+        """Release AI session state after backend has fetched needed artifacts."""
+        url = f"{self.base_url}/api/v1/sessions/{ai_session_id}"
+
         try:
-            async with httpx.AsyncClient(timeout=httpx.Timeout(5.0)) as client:
-                response = await client.get(url)
+            async with httpx.AsyncClient(timeout=self.timeout) as client:
+                response = await client.delete(url)
                 response.raise_for_status()
                 return response.json()
-                
         except httpx.HTTPError as e:
-            logger.error(f"AI Service health check failed: {str(e)}")
+            logger.error(
+                "Failed to delete AI session",
+                extra={"ai_session_id": ai_session_id, "error": str(e)}
+            )
             raise
     
     async def register_face_embeddings(

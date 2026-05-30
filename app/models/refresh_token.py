@@ -10,7 +10,7 @@ class RefreshToken(BaseModel):
     __tablename__ = "refresh_tokens"
     
     user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
-    token = Column(String(255), unique=True, nullable=False, index=True)
+    token = Column(String(1024), unique=True, nullable=False, index=True)
     expires_at = Column(DateTime, nullable=False)
     revoked_at = Column(DateTime, nullable=True)
     

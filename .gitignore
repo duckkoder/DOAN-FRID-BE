@@ -103,6 +103,7 @@ docker-compose.override.yml
 .env.local
 # ignore .env but allow example
 !.env.example
+!.env.platform.example
 
 # Node (if frontend assets present)
 node_modules/
@@ -122,5 +123,6 @@ yarn-error.log
 .env.production
 .env.test
 !.env.example
+!.env.platform.example
 
 key.txt

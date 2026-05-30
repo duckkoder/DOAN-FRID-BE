@@ -4,10 +4,28 @@ from sqlalchemy.orm import Session
 
 from app.database.session import get_db
 from app.core.dependencies import get_current_user
+from app.models.student import Student
 from app.models.user import User
 from app.services.face_registration_service import FaceRegistrationDBService
 
 router = APIRouter(prefix="/face-registration", tags=["Face Registration"])
+
+
+def _get_current_student(db: Session, current_user: User) -> Student:
+    """Load the current user's student row from the active tenant DB session."""
+    if current_user.role != "student":
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Current user is not a student"
+        )
+
+    student = db.query(Student).filter(Student.user_id == current_user.id).first()
+    if not student:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Current user is not a student"
+        )
+    return student
 
 
 @router.get(
@@ -33,7 +51,8 @@ async def get_registration_status(
     # Only allow student to check their own status, or admin to check any
     if current_user.role == "student":
         # For students, check if they're checking their own status
-        if not current_user.student or current_user.student.id != student_id:
+        student = _get_current_student(db, current_user)
+        if student.id != student_id:
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail="You can only check your own registration status"
@@ -114,15 +133,8 @@ async def get_my_registration_status(
     Get face registration status for current user.
     Only works if user is a student.
     """
-    # Check if user is a student
-    if current_user.role != "student" or not current_user.student:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Current user is not a student"
-        )
-    
-    # Get student ID from relationship
-    student_id = current_user.student.id
+    student = _get_current_student(db, current_user)
+    student_id = student.id
     
     return await get_registration_status(
         student_id=student_id,
@@ -144,14 +156,8 @@ async def load_pending_review_images(
     Load temporary images when student needs to review.
     Only works for pending_student_review status.
     """
-    # Check if user is a student
-    if current_user.role != "student" or not current_user.student:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Current user is not a student"
-        )
-    
-    student_id = current_user.student.id
+    student = _get_current_student(db, current_user)
+    student_id = student.id
     
     # Get most recent registration with pending_student_review status
     from app.models.face_registration_request import FaceRegistrationRequest
@@ -210,14 +216,8 @@ async def confirm_pending_review(
     If accepted: upload to S3 and change status to pending_admin_review
     If rejected: delete temp data and change status to can_register
     """
-    # Check if user is a student
-    if current_user.role != "student" or not current_user.student:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Current user is not a student"
-        )
-    
-    student_id = current_user.student.id
+    student = _get_current_student(db, current_user)
+    student_id = student.id
     
     # Get most recent registration with pending_student_review status
     from app.models.face_registration_request import FaceRegistrationRequest
@@ -302,7 +302,7 @@ async def confirm_pending_review(
             
             # Batch create file records
             file_records = db_service.batch_create_file_records(
-                uploader_id=current_user.student.user_id,
+                uploader_id=student.user_id,
                 file_metadata_list=file_metadata_list,
                 category="face_registration"
             )

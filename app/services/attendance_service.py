@@ -1,14 +1,14 @@
-"""Attendance service với AI-Service integration."""
+﻿"""Attendance service vá»›i AI-Service integration."""
 import logging
 import httpx
 import base64
 from typing import List, Optional
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, time, timedelta, timezone
 from zoneinfo import ZoneInfo
 from sqlalchemy.orm import Session
 from fastapi import HTTPException, status
 
-# ✅ Define Vietnam timezone for consistency
+# âœ… Define Vietnam timezone for consistency
 VIETNAM_TZ = ZoneInfo('Asia/Ho_Chi_Minh')
 
 from app.models.user import User
@@ -35,9 +35,22 @@ from app.schemas.attendance import (
 
 logger = logging.getLogger(__name__)
 
+PERIOD_TIME_SLOTS = {
+    1: ("07:00", "07:50"),
+    2: ("08:00", "08:50"),
+    3: ("09:00", "09:50"),
+    4: ("10:00", "10:50"),
+    5: ("11:00", "11:50"),
+    6: ("13:00", "13:50"),
+    7: ("14:00", "14:50"),
+    8: ("15:00", "15:50"),
+    9: ("16:00", "16:50"),
+    10: ("17:00", "17:50"),
+}
+
 
 class AttendanceService:
-    """Service xử lý logic điểm danh với AI-Service integration."""
+    """Service xá»­ lÃ½ logic Ä‘iá»ƒm danh vá»›i AI-Service integration."""
     
     def __init__(self, db: Session):
         self.db = db
@@ -52,6 +65,77 @@ class AttendanceService:
         if len(numbers) >= 2:
             return list(range(numbers[0], numbers[-1] + 1))
         return numbers
+
+    def _parse_period_time(self, value: str) -> time:
+        hour, minute = [int(part) for part in value.split(":", 1)]
+        return time(hour=hour, minute=minute)
+
+    def _validate_session_create_window(self, request: StartSessionRequest) -> None:
+        if settings.ATTENDANCE_ALLOW_CREATE_ANYTIME:
+            return
+
+        if request.day_of_week is None or not request.period_range:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Cần chọn đúng buổi học để bắt đầu điểm danh",
+            )
+
+        now = datetime.now(VIETNAM_TZ)
+        if request.day_of_week != now.weekday():
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Chỉ có thể tạo phiên điểm danh trong ngày học của buổi này",
+            )
+
+        target_periods = self._extract_period_numbers(request.period_range)
+        if not target_periods:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Khoảng tiết học không hợp lệ",
+            )
+
+        schedule_rows = self.db.query(ClassSchedule).filter(
+            ClassSchedule.class_id == request.class_id
+        ).all()
+        has_matching_schedule = any(
+            (row.schedule_data or {}).get("day") == request.day_of_week
+            and ((row.schedule_data or {}).get("periods") or []) == target_periods
+            for row in schedule_rows
+        )
+        if not has_matching_schedule:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Buổi học này không khớp với lịch của lớp",
+            )
+
+        first_period = min(target_periods)
+        last_period = max(target_periods)
+        if first_period not in PERIOD_TIME_SLOTS or last_period not in PERIOD_TIME_SLOTS:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Tiết học không hợp lệ",
+            )
+
+        session_start = datetime.combine(
+            now.date(),
+            self._parse_period_time(PERIOD_TIME_SLOTS[first_period][0]),
+            tzinfo=VIETNAM_TZ,
+        )
+        session_end = datetime.combine(
+            now.date(),
+            self._parse_period_time(PERIOD_TIME_SLOTS[last_period][1]),
+            tzinfo=VIETNAM_TZ,
+        )
+        grace = timedelta(minutes=max(settings.ATTENDANCE_CREATE_WINDOW_GRACE_MINUTES, 0))
+
+        if now < session_start - grace or now > session_end + grace:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=(
+                    "Chỉ có thể tạo phiên điểm danh trong khung giờ "
+                    f"{PERIOD_TIME_SLOTS[first_period][0]} - {PERIOD_TIME_SLOTS[last_period][1]}"
+                ),
+            )
 
     def _resolve_session_location(self, request: StartSessionRequest) -> Optional[str]:
         if request.location and request.location.strip().lower() not in {"classroom", "class room", "n/a"}:
@@ -93,60 +177,62 @@ class AttendanceService:
         request: StartSessionRequest
     ) -> StartSessionWithAIResponse:
         """
-        Bắt đầu phiên điểm danh với AI-Service.
+        Báº¯t Ä‘áº§u phiÃªn Ä‘iá»ƒm danh vá»›i AI-Service.
         
         Flow:
-        1. Kiểm tra quyền và validate
-        2. Tạo session trong DB với status="scheduled"
+        1. Kiá»ƒm tra quyá»n vÃ  validate
+        2. Táº¡o session trong DB vá»›i status="scheduled"
         3. Generate JWT token cho WebSocket
-        4. Call AI-Service để tạo session
-        5. Update ai_session_id và status="ongoing"
+        4. Call AI-Service Ä‘á»ƒ táº¡o session
+        5. Update ai_session_id vÃ  status="ongoing"
         6. Return session info + WebSocket URL + token
         
         Args:
-            current_user: User hiện tại (phải là teacher)
+            current_user: User hiá»‡n táº¡i (pháº£i lÃ  teacher)
             request: StartSessionRequest
             
         Returns:
-            StartSessionWithAIResponse với thông tin session và WebSocket
+            StartSessionWithAIResponse vá»›i thÃ´ng tin session vÃ  WebSocket
             
         Raises:
-            HTTPException: Nếu validation fail hoặc AI-Service error
+            HTTPException: Náº¿u validation fail hoáº·c AI-Service error
         """
-        # 1. Kiểm tra role
+        # 1. Kiá»ƒm tra role
         if current_user.role != UserRole.TEACHER:
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
-                detail="Chỉ giáo viên mới có thể bắt đầu phiên điểm danh"
+                detail="Chá»‰ giÃ¡o viÃªn má»›i cÃ³ thá»ƒ báº¯t Ä‘áº§u phiÃªn Ä‘iá»ƒm danh"
             )
         
-        # 2. Lấy thông tin giáo viên
+        # 2. Láº¥y thÃ´ng tin giÃ¡o viÃªn
         teacher = self.db.query(Teacher).filter(
             Teacher.user_id == current_user.id
         ).first()
         if not teacher:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
-                detail="Không tìm thấy thông tin giáo viên"
+                detail="KhÃ´ng tÃ¬m tháº¥y thÃ´ng tin giÃ¡o viÃªn"
             )
         
-        # 3. Kiểm tra lớp tồn tại và thuộc sở hữu
+        # 3. Kiá»ƒm tra lá»›p tá»“n táº¡i vÃ  thuá»™c sá»Ÿ há»¯u
         class_obj = self.db.query(Class).filter(
             Class.id == request.class_id
         ).first()
         if not class_obj:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
-                detail="Không tìm thấy lớp học"
+                detail="KhÃ´ng tÃ¬m tháº¥y lá»›p há»c"
             )
         
         if class_obj.teacher_id != teacher.id:
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
-                detail="Bạn không có quyền với lớp học này"
+                detail="Báº¡n khÃ´ng cÃ³ quyá»n vá»›i lá»›p há»c nÃ y"
             )
+
+        self._validate_session_create_window(request)
         
-        # 4. Kiểm tra không có phiên nào đang ongoing
+        # 4. Kiá»ƒm tra khÃ´ng cÃ³ phiÃªn nÃ o Ä‘ang ongoing
         ongoing_session = self.db.query(AttendanceSession).filter(
             AttendanceSession.class_id == request.class_id,
             AttendanceSession.status.in_([SessionStatus.SCHEDULED.value, SessionStatus.ONGOING.value])
@@ -155,10 +241,10 @@ class AttendanceService:
         if ongoing_session:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail=f"Lớp đang có phiên điểm danh đang diễn ra (ID: {ongoing_session.id})"
+                detail=f"Lá»›p Ä‘ang cÃ³ phiÃªn Ä‘iá»ƒm danh Ä‘ang diá»…n ra (ID: {ongoing_session.id})"
             )
         
-        # 5. Lấy danh sách student_codes trong lớp
+        # 5. Láº¥y danh sÃ¡ch student_codes trong lá»›p
         class_members = self.db.query(ClassMember).filter(
             ClassMember.class_id == request.class_id
         ).all()
@@ -174,13 +260,23 @@ class AttendanceService:
         if not student_codes:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Lớp học không có sinh viên nào"
+                detail="Lá»›p há»c khÃ´ng cÃ³ sinh viÃªn nÃ o"
             )
         
-        # 6. Tạo session trong DB với status="scheduled"
-        # ✅ Use Vietnam timezone for all datetime fields
+        from app.services.face_embedding_service import FaceEmbeddingService
+        face_embeddings = FaceEmbeddingService.get_approved_embeddings_by_student_codes(
+            self.db,
+            student_codes,
+        )
+        if not face_embeddings:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Lớp học chưa có embedding khuôn mặt đã duyệt",
+            )
+        # 6. Táº¡o session trong DB vá»›i status="scheduled"
+        # âœ… Use Vietnam timezone for all datetime fields
         vietnam_now = datetime.now(VIETNAM_TZ)
-        default_session_name = f"Điểm danh {vietnam_now.strftime('%d/%m/%Y %H:%M')}"
+        default_session_name = f"Äiá»ƒm danh {vietnam_now.strftime('%d/%m/%Y %H:%M')}"
         
         session_location = self._resolve_session_location(request)
 
@@ -188,14 +284,14 @@ class AttendanceService:
             class_id=request.class_id,
             session_name=request.session_name or default_session_name,
             start_time=vietnam_now,
-            status=SessionStatus.SCHEDULED.value,  # Scheduled cho đến khi AI-Service confirm
+            status=SessionStatus.SCHEDULED.value,  # Scheduled cho Ä‘áº¿n khi AI-Service confirm
             late_threshold_minutes=request.late_threshold_minutes,
             location=session_location,
             allow_late_checkin=True,
             day_of_week=request.day_of_week,
             period_range=request.period_range,
             session_index=request.session_index,
-            ai_session_id=None  # Chưa có
+            ai_session_id=None  # ChÆ°a cÃ³
         )
         
         self.db.add(new_session)
@@ -220,22 +316,23 @@ class AttendanceService:
             expires_delta=token_expires
         )
         
-        # 8. Call AI-Service để tạo session
+        # 8. Call AI-Service Ä‘á»ƒ táº¡o session
         try:
             ai_response = await ai_service_client.create_session(
                 backend_session_id=new_session.id,
                 class_id=request.class_id,
                 student_codes=student_codes,
+                face_embeddings=face_embeddings,
                 ws_token=ws_token,
                 allowed_users=[str(current_user.id)]
             )
             
             ai_session_id = ai_response.get("session_id")
             if not ai_session_id:
-                raise ValueError("AI-Service không trả về session_id")
+                raise ValueError("AI-Service khÃ´ng tráº£ vá» session_id")
             
         except Exception as e:
-            # Rollback session nếu AI-Service fail
+            # Rollback session náº¿u AI-Service fail
             self.db.delete(new_session)
             self.db.commit()
             
@@ -249,10 +346,10 @@ class AttendanceService:
             
             raise HTTPException(
                 status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-                detail=f"Không thể khởi tạo AI-Service: {str(e)}"
+                detail=f"KhÃ´ng thá»ƒ khá»Ÿi táº¡o AI-Service: {str(e)}"
             )
         
-        # 9. Update ai_session_id và status="ongoing"
+        # 9. Update ai_session_id vÃ  status="ongoing"
         new_session.ai_session_id = ai_session_id
         new_session.status = SessionStatus.ONGOING.value
         self.db.commit()
@@ -292,39 +389,39 @@ class AttendanceService:
         session_id: int
     ) -> ResumeSessionResponse:
         """
-        Resume một phiên điểm danh đang ongoing sau khi refresh page.
+        Resume má»™t phiÃªn Ä‘iá»ƒm danh Ä‘ang ongoing sau khi refresh page.
         
-        Tạo token WebSocket mới để kết nối lại với AI-Service.
-        Nếu AI-Service session đã bị mất (restart/timeout), báo lỗi yêu cầu kết thúc phiên.
+        Táº¡o token WebSocket má»›i Ä‘á»ƒ káº¿t ná»‘i láº¡i vá»›i AI-Service.
+        Náº¿u AI-Service session Ä‘Ã£ bá»‹ máº¥t (restart/timeout), bÃ¡o lá»—i yÃªu cáº§u káº¿t thÃºc phiÃªn.
         
         Args:
-            current_user: User hiện tại (phải là teacher của lớp)
-            session_id: ID của session cần resume
+            current_user: User hiá»‡n táº¡i (pháº£i lÃ  teacher cá»§a lá»›p)
+            session_id: ID cá»§a session cáº§n resume
             
         Returns:
-            ResumeSessionResponse với thông tin WebSocket mới
+            ResumeSessionResponse vá»›i thÃ´ng tin WebSocket má»›i
             
         Raises:
-            HTTPException: Nếu session không tồn tại, không ongoing, AI session đã mất, hoặc không có quyền
+            HTTPException: Náº¿u session khÃ´ng tá»“n táº¡i, khÃ´ng ongoing, AI session Ä‘Ã£ máº¥t, hoáº·c khÃ´ng cÃ³ quyá»n
         """
-        # 1. Kiểm tra role
+        # 1. Kiá»ƒm tra role
         if current_user.role != UserRole.TEACHER:
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
-                detail="Chỉ giáo viên mới có thể resume phiên điểm danh"
+                detail="Chá»‰ giÃ¡o viÃªn má»›i cÃ³ thá»ƒ resume phiÃªn Ä‘iá»ƒm danh"
             )
         
-        # 2. Lấy thông tin giáo viên
+        # 2. Láº¥y thÃ´ng tin giÃ¡o viÃªn
         teacher = self.db.query(Teacher).filter(
             Teacher.user_id == current_user.id
         ).first()
         if not teacher:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
-                detail="Không tìm thấy thông tin giáo viên"
+                detail="KhÃ´ng tÃ¬m tháº¥y thÃ´ng tin giÃ¡o viÃªn"
             )
         
-        # 3. Lấy session
+        # 3. Láº¥y session
         session = self.db.query(AttendanceSession).filter(
             AttendanceSession.id == session_id
         ).first()
@@ -332,17 +429,17 @@ class AttendanceService:
         if not session:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
-                detail="Không tìm thấy phiên điểm danh"
+                detail="KhÃ´ng tÃ¬m tháº¥y phiÃªn Ä‘iá»ƒm danh"
             )
         
-        # 4. Kiểm tra session đang ongoing
+        # 4. Kiá»ƒm tra session Ä‘ang ongoing
         if session.status != SessionStatus.ONGOING.value:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail=f"Phiên điểm danh không ở trạng thái đang diễn ra (status: {session.status})"
+                detail=f"PhiÃªn Ä‘iá»ƒm danh khÃ´ng á»Ÿ tráº¡ng thÃ¡i Ä‘ang diá»…n ra (status: {session.status})"
             )
         
-        # 5. Kiểm tra quyền - lớp phải thuộc về giáo viên này
+        # 5. Kiá»ƒm tra quyá»n - lá»›p pháº£i thuá»™c vá» giÃ¡o viÃªn nÃ y
         class_obj = self.db.query(Class).filter(
             Class.id == session.class_id
         ).first()
@@ -350,19 +447,19 @@ class AttendanceService:
         if not class_obj or class_obj.teacher_id != teacher.id:
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
-                detail="Bạn không có quyền với phiên điểm danh này"
+                detail="Báº¡n khÃ´ng cÃ³ quyá»n vá»›i phiÃªn Ä‘iá»ƒm danh nÃ y"
             )
         
-        # 6. Kiểm tra AI-Service session còn tồn tại không
+        # 6. Kiá»ƒm tra AI-Service session cÃ²n tá»“n táº¡i khÃ´ng
         ai_session_id = session.ai_session_id
         
         if not ai_session_id:
             raise HTTPException(
                 status_code=status.HTTP_410_GONE,
-                detail="Phiên điểm danh không có kết nối AI. Vui lòng kết thúc phiên này và tạo phiên điểm danh mới."
+                detail="PhiÃªn Ä‘iá»ƒm danh khÃ´ng cÃ³ káº¿t ná»‘i AI. Vui lÃ²ng káº¿t thÃºc phiÃªn nÃ y vÃ  táº¡o phiÃªn Ä‘iá»ƒm danh má»›i."
             )
         
-        # Kiểm tra AI session còn active không
+        # Kiá»ƒm tra AI session cÃ²n active khÃ´ng
         try:
             ai_status = await ai_service_client.get_session_status(ai_session_id)
             if ai_status.get("status") != "active":
@@ -376,7 +473,7 @@ class AttendanceService:
                 )
                 raise HTTPException(
                     status_code=status.HTTP_410_GONE,
-                    detail="Kết nối AI đã hết hạn hoặc không còn hoạt động. Vui lòng kết thúc phiên này và tạo phiên điểm danh mới."
+                    detail="Káº¿t ná»‘i AI Ä‘Ã£ háº¿t háº¡n hoáº·c khÃ´ng cÃ²n hoáº¡t Ä‘á»™ng. Vui lÃ²ng káº¿t thÃºc phiÃªn nÃ y vÃ  táº¡o phiÃªn Ä‘iá»ƒm danh má»›i."
                 )
         except HTTPException:
             # Re-raise HTTP exceptions
@@ -392,7 +489,7 @@ class AttendanceService:
             )
             raise HTTPException(
                 status_code=status.HTTP_410_GONE,
-                detail="Kết nối AI đã mất (có thể do hệ thống khởi động lại). Vui lòng kết thúc phiên này và tạo phiên điểm danh mới."
+                detail="Káº¿t ná»‘i AI Ä‘Ã£ máº¥t (cÃ³ thá»ƒ do há»‡ thá»‘ng khá»Ÿi Ä‘á»™ng láº¡i). Vui lÃ²ng káº¿t thÃºc phiÃªn nÃ y vÃ  táº¡o phiÃªn Ä‘iá»ƒm danh má»›i."
             )
         
         logger.info(
@@ -403,7 +500,7 @@ class AttendanceService:
             }
         )
         
-        # 7. Generate JWT token mới cho WebSocket
+        # 7. Generate JWT token má»›i cho WebSocket
         token_expires = timedelta(minutes=settings.AI_WEBSOCKET_TOKEN_EXPIRE_MINUTES)
         ws_token = create_websocket_token(
             user_id=current_user.id,
@@ -450,23 +547,23 @@ class AttendanceService:
         signature: str
     ) -> AICallbackResponse:
         """
-        Xử lý callback từ AI-Service khi có sinh viên được validate.
+        Xá»­ lÃ½ callback tá»« AI-Service khi cÃ³ sinh viÃªn Ä‘Æ°á»£c validate.
         
         Flow:
         1. Verify HMAC signature
-        2. Tìm session bằng ai_session_id
-        3. Lưu attendance records (với idempotency check)
+        2. TÃ¬m session báº±ng ai_session_id
+        3. LÆ°u attendance records (vá»›i idempotency check)
         4. Return response
         
         Args:
             payload: AICallbackPayload
-            signature: HMAC signature từ header
+            signature: HMAC signature tá»« header
             
         Returns:
             AICallbackResponse
             
         Raises:
-            HTTPException: Nếu signature invalid hoặc session not found
+            HTTPException: Náº¿u signature invalid hoáº·c session not found
         """
         import hmac
         import hashlib
@@ -504,7 +601,7 @@ class AttendanceService:
                 detail="Invalid signature"
             )
         
-        # 2. Tìm session
+        # 2. TÃ¬m session
         session = self.db.query(AttendanceSession).filter(
             AttendanceSession.ai_session_id == payload.session_id,
             AttendanceSession.status == SessionStatus.ONGOING.value
@@ -520,13 +617,13 @@ class AttendanceService:
                 detail="Session not found"
             )
         
-        # 3. Process validated students với confidence threshold logic
+        # 3. Process validated students vá»›i confidence threshold logic
         processed_count = 0
         pending_count = 0
         auto_approved_count = 0
         
         for validated_student in payload.validated_students:
-            # Tìm student trong class
+            # TÃ¬m student trong class
             student = self.db.query(Student).filter(
                 Student.student_code == validated_student.student_code
             ).first()
@@ -538,7 +635,7 @@ class AttendanceService:
                 )
                 continue
             
-            # Idempotency check - không tạo duplicate
+            # Idempotency check - khÃ´ng táº¡o duplicate
             existing_record = self.db.query(AttendanceRecord).filter(
                 AttendanceRecord.session_id == session.id,
                 AttendanceRecord.student_id == student.id
@@ -554,16 +651,16 @@ class AttendanceService:
                 )
                 continue
             
-            # ✅ HYBRID APPROACH: Kiểm tra confidence để quyết định status
+            # âœ… HYBRID APPROACH: Kiá»ƒm tra confidence Ä‘á»ƒ quyáº¿t Ä‘á»‹nh status
             confidence = validated_student.avg_confidence
             
             if confidence >= settings.AI_CONFIDENCE_THRESHOLD:
-                # Confidence cao → Tự động xác nhận là PRESENT
+                # Confidence cao â†’ Tá»± Ä‘á»™ng xÃ¡c nháº­n lÃ  PRESENT
                 attendance_status = AttendanceStatus.PRESENT
                 notes = f"AI-validated (track_id={validated_student.track_id}, frames={validated_student.frame_count}, confidence={confidence:.3f}, auto-approved)"
                 auto_approved_count += 1
                 logger.info(
-                    f"✅ Auto-approved attendance (high confidence)",
+                    f"âœ… Auto-approved attendance (high confidence)",
                     extra={
                         "student_code": validated_student.student_code,
                         "confidence": confidence,
@@ -571,12 +668,12 @@ class AttendanceService:
                     }
                 )
             else:
-                # Confidence thấp → Chờ giáo viên xác nhận (PENDING)
+                # Confidence tháº¥p â†’ Chá» giÃ¡o viÃªn xÃ¡c nháº­n (PENDING)
                 attendance_status = AttendanceStatus.PENDING
                 notes = f"Pending teacher confirmation (track_id={validated_student.track_id}, frames={validated_student.frame_count}, confidence={confidence:.3f})"
                 pending_count += 1
                 logger.warning(
-                    f"⏳ Pending teacher confirmation (low confidence)",
+                    f"â³ Pending teacher confirmation (low confidence)",
                     extra={
                         "student_code": validated_student.student_code,
                         "confidence": confidence,
@@ -584,30 +681,30 @@ class AttendanceService:
                     }
                 )
             
-            # Tạo attendance record (image_path = NULL, sẽ update sau khi end_session)
+            # Táº¡o attendance record (image_path = NULL, sáº½ update sau khi end_session)
             new_record = AttendanceRecord(
                 session_id=session.id,
                 student_id=student.id,
                 status=attendance_status,
                 recorded_at=validated_student.validation_passed_at,
                 confidence_score=validated_student.avg_confidence,
-                image_path=None,  # ⚠️ CHƯA CÓ ẢNH, sẽ update sau
+                image_path=None,  # âš ï¸ CHÆ¯A CÃ“ áº¢NH, sáº½ update sau
                 notes=notes
             )
             
             self.db.add(new_record)
-            self.db.flush()  # ✅ Flush để có ID ngay (cần cho WebSocket notification)
+            self.db.flush()  # âœ… Flush Ä‘á»ƒ cÃ³ ID ngay (cáº§n cho WebSocket notification)
             
             processed_count += 1
             
-            # ✅ Nếu PENDING, gửi realtime notification qua WebSocket
+            # âœ… Náº¿u PENDING, gá»­i realtime notification qua WebSocket
             if attendance_status == AttendanceStatus.PENDING:
                 try:
-                    # Import ở đây để tránh circular import
+                    # Import á»Ÿ Ä‘Ã¢y Ä‘á»ƒ trÃ¡nh circular import
                     from app.api.v1.attendance import manager
                     from app.schemas.attendance import WSPendingConfirmation
                     
-                    # Broadcast pending confirmation tới giáo viên trong phiên
+                    # Broadcast pending confirmation tá»›i giÃ¡o viÃªn trong phiÃªn
                     import asyncio
                     asyncio.create_task(
                         manager.broadcast_to_session(
@@ -621,11 +718,11 @@ class AttendanceService:
                                 full_name=student.user.full_name,
                                 confidence_score=validated_student.avg_confidence,
                                 recorded_at=validated_student.validation_passed_at,
-                                message=f"Sinh viên {student.user.full_name} cần xác nhận (confidence: {confidence:.1%})"
+                                message=f"Sinh viÃªn {student.user.full_name} cáº§n xÃ¡c nháº­n (confidence: {confidence:.1%})"
                             ).model_dump()
                         )
                     )
-                    logger.info(f"📢 Sent pending confirmation notification for student {student.student_code}")
+                    logger.info(f"ðŸ“¢ Sent pending confirmation notification for student {student.student_code}")
                 except Exception as ws_error:
                     logger.error(f"Failed to send WebSocket notification: {ws_error}")
             
@@ -655,27 +752,27 @@ class AttendanceService:
         skip_image_upload: bool = False
     ):
         """
-        Kết thúc phiên điểm danh.
+        Káº¿t thÃºc phiÃªn Ä‘iá»ƒm danh.
         
         Logic:
-        1. Kiểm tra quyền
-        2. Cập nhật status = "finished"
-        3. Tự động đánh dấu absent nếu cần
-        4. Trả về thống kê
+        1. Kiá»ƒm tra quyá»n
+        2. Cáº­p nháº­t status = "finished"
+        3. Tá»± Ä‘á»™ng Ä‘Ã¡nh dáº¥u absent náº¿u cáº§n
+        4. Tráº£ vá» thá»‘ng kÃª
         
         Args:
-            skip_image_upload: Nếu True, bỏ qua việc upload ảnh (để chạy ở background task)
+            skip_image_upload: Náº¿u True, bá» qua viá»‡c upload áº£nh (Ä‘á»ƒ cháº¡y á»Ÿ background task)
         """
         from app.schemas.attendance import EndSessionResponse
         
-        # Kiểm tra role
+        # Kiá»ƒm tra role
         if current_user.role != UserRole.TEACHER:
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
-                detail="Chỉ giáo viên mới có thể kết thúc phiên"
+                detail="Chá»‰ giÃ¡o viÃªn má»›i cÃ³ thá»ƒ káº¿t thÃºc phiÃªn"
             )
         
-        # Lấy phiên
+        # Láº¥y phiÃªn
         session = self.db.query(AttendanceSession).filter(
             AttendanceSession.id == session_id
         ).first()
@@ -683,44 +780,44 @@ class AttendanceService:
         if not session:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
-                detail="Không tìm thấy phiên điểm danh"
+                detail="KhÃ´ng tÃ¬m tháº¥y phiÃªn Ä‘iá»ƒm danh"
             )
         
-        # Kiểm tra quyền sở hữu
+        # Kiá»ƒm tra quyá»n sá»Ÿ há»¯u
         teacher = self.db.query(Teacher).filter(Teacher.user_id == current_user.id).first()
         class_obj = self.db.query(Class).filter(Class.id == session.class_id).first()
         
         if not class_obj or class_obj.teacher_id != teacher.id:
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
-                detail="Bạn không có quyền với phiên này"
+                detail="Báº¡n khÃ´ng cÃ³ quyá»n vá»›i phiÃªn nÃ y"
             )
         
-        # Kiểm tra phiên đang ongoing
+        # Kiá»ƒm tra phiÃªn Ä‘ang ongoing
         if session.status != SessionStatus.ONGOING.value:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail=f"Phiên không ở trạng thái đang diễn ra (status: {session.status})"
+                detail=f"PhiÃªn khÃ´ng á»Ÿ tráº¡ng thÃ¡i Ä‘ang diá»…n ra (status: {session.status})"
             )
         
-        # Tự động đánh dấu absent nếu được yêu cầu
+        # Tá»± Ä‘á»™ng Ä‘Ã¡nh dáº¥u absent náº¿u Ä‘Æ°á»£c yÃªu cáº§u
         if request.mark_absent:
-            # Lấy tất cả sinh viên trong lớp
+            # Láº¥y táº¥t cáº£ sinh viÃªn trong lá»›p
             class_members = self.db.query(ClassMember).filter(
                 ClassMember.class_id == session.class_id
             ).all()
             all_student_ids = [member.student_id for member in class_members]
             
-            # Lấy các sinh viên đã điểm danh
+            # Láº¥y cÃ¡c sinh viÃªn Ä‘Ã£ Ä‘iá»ƒm danh
             existing_records = self.db.query(AttendanceRecord).filter(
                 AttendanceRecord.session_id == session_id
             ).all()
             recorded_student_ids = {record.student_id for record in existing_records}
             
-            # Tìm sinh viên chưa điểm danh
+            # TÃ¬m sinh viÃªn chÆ°a Ä‘iá»ƒm danh
             absent_student_ids = [sid for sid in all_student_ids if sid not in recorded_student_ids]
             
-            # Tạo bản ghi absent
+            # Táº¡o báº£n ghi absent
             for student_id in absent_student_ids:
                 new_record = AttendanceRecord(
                     session_id=session_id,
@@ -730,35 +827,35 @@ class AttendanceService:
                 )
                 self.db.add(new_record)
         
-        # Commit để có các bản ghi absent
+        # Commit Ä‘á»ƒ cÃ³ cÃ¡c báº£n ghi absent
         self.db.commit()
         
-        # Xử lý đơn xin nghỉ đã được chấp nhận
-        # Lấy tất cả records có status ABSENT
+        # Xá»­ lÃ½ Ä‘Æ¡n xin nghá»‰ Ä‘Ã£ Ä‘Æ°á»£c cháº¥p nháº­n
+        # Láº¥y táº¥t cáº£ records cÃ³ status ABSENT
         absent_records = self.db.query(AttendanceRecord).filter(
             AttendanceRecord.session_id == session_id,
             AttendanceRecord.status == AttendanceStatus.ABSENT
         ).all()
         
         if absent_records:
-            # Lấy thông tin về ngày và thời gian của session
-            # ✅ FIX: Convert session start_time to Vietnam timezone before extracting date
+            # Láº¥y thÃ´ng tin vá» ngÃ y vÃ  thá»i gian cá»§a session
+            # âœ… FIX: Convert session start_time to Vietnam timezone before extracting date
             session_start_vietnam = session.start_time
             if session_start_vietnam.tzinfo is None:
-                # Nếu naive datetime, assume UTC và convert sang Vietnam
+                # Náº¿u naive datetime, assume UTC vÃ  convert sang Vietnam
                 session_start_vietnam = session_start_vietnam.replace(tzinfo=timezone.utc).astimezone(VIETNAM_TZ)
             else:
-                # Nếu aware datetime, convert sang Vietnam timezone
+                # Náº¿u aware datetime, convert sang Vietnam timezone
                 session_start_vietnam = session_start_vietnam.astimezone(VIETNAM_TZ)
             
             session_date = session_start_vietnam.date()
             
-            # ✅ FIX: Tạo range với timezone-aware datetime để so sánh chính xác
-            # leave_date trong DB có thể lưu dạng UTC, cần convert sang Vietnam
+            # âœ… FIX: Táº¡o range vá»›i timezone-aware datetime Ä‘á»ƒ so sÃ¡nh chÃ­nh xÃ¡c
+            # leave_date trong DB cÃ³ thá»ƒ lÆ°u dáº¡ng UTC, cáº§n convert sang Vietnam
             day_start_vietnam = datetime.combine(session_date, datetime.min.time()).replace(tzinfo=VIETNAM_TZ)
             day_end_vietnam = datetime.combine(session_date, datetime.max.time()).replace(tzinfo=VIETNAM_TZ)
             
-            # Convert sang UTC để so sánh với DB (PostgreSQL thường lưu UTC)
+            # Convert sang UTC Ä‘á»ƒ so sÃ¡nh vá»›i DB (PostgreSQL thÆ°á»ng lÆ°u UTC)
             day_start_utc = day_start_vietnam.astimezone(timezone.utc)
             day_end_utc = day_end_vietnam.astimezone(timezone.utc)
             
@@ -769,16 +866,16 @@ class AttendanceService:
                 f"day_start_utc={day_start_utc}, day_end_utc={day_end_utc}"
             )
             
-            # Tìm các đơn xin nghỉ đã được chấp nhận cho lớp này trong ngày này
-            # So sánh với cả 2 trường hợp: leave_date lưu dạng UTC hoặc naive
+            # TÃ¬m cÃ¡c Ä‘Æ¡n xin nghá»‰ Ä‘Ã£ Ä‘Æ°á»£c cháº¥p nháº­n cho lá»›p nÃ y trong ngÃ y nÃ y
+            # So sÃ¡nh vá»›i cáº£ 2 trÆ°á»ng há»£p: leave_date lÆ°u dáº¡ng UTC hoáº·c naive
             from sqlalchemy import or_, func
             approved_leave_requests = self.db.query(LeaveRequest).filter(
                 LeaveRequest.class_id == session.class_id,
                 LeaveRequest.status == RequestStatus.APPROVED.value,
                 or_(
-                    # Case 1: leave_date là UTC aware datetime
+                    # Case 1: leave_date lÃ  UTC aware datetime
                     (LeaveRequest.leave_date >= day_start_utc) & (LeaveRequest.leave_date < day_end_utc),
-                    # Case 2: leave_date là naive datetime (so sánh trực tiếp với Vietnam date)
+                    # Case 2: leave_date lÃ  naive datetime (so sÃ¡nh trá»±c tiáº¿p vá»›i Vietnam date)
                     func.date(LeaveRequest.leave_date) == session_date
                 )
             ).all()
@@ -789,50 +886,56 @@ class AttendanceService:
             for lr in approved_leave_requests:
                 logger.info(f"  - LeaveRequest ID={lr.id}, student_id={lr.student_id}, leave_date={lr.leave_date}")
             
-            # Tạo map student_id -> leave_request để tra cứu nhanh
+            # Táº¡o map student_id -> leave_request Ä‘á»ƒ tra cá»©u nhanh
             approved_student_ids = {lr.student_id: lr for lr in approved_leave_requests}
             
-            # Cập nhật status cho các sinh viên có đơn được duyệt
+            # Cáº­p nháº­t status cho cÃ¡c sinh viÃªn cÃ³ Ä‘Æ¡n Ä‘Æ°á»£c duyá»‡t
             excused_count = 0
             for record in absent_records:
                 if record.student_id in approved_student_ids:
                     leave_request = approved_student_ids[record.student_id]
                     
-                    # Kiểm tra thêm về time_slot nếu cần (tùy chọn)
-                    # Có thể match với period_range hoặc session_index
-                    # Ở đây tôi cập nhật tất cả absent có đơn trong ngày
+                    # Kiá»ƒm tra thÃªm vá» time_slot náº¿u cáº§n (tÃ¹y chá»n)
+                    # CÃ³ thá»ƒ match vá»›i period_range hoáº·c session_index
+                    # á»ž Ä‘Ã¢y tÃ´i cáº­p nháº­t táº¥t cáº£ absent cÃ³ Ä‘Æ¡n trong ngÃ y
                     
                     record.status = AttendanceStatus.EXCUSED
-                    record.notes = f"Đã có đơn xin nghỉ được chấp nhận (ID: {leave_request.id})"
+                    record.notes = f"ÄÃ£ cÃ³ Ä‘Æ¡n xin nghá»‰ Ä‘Æ°á»£c cháº¥p nháº­n (ID: {leave_request.id})"
                     excused_count += 1
                     logger.info(
                         f"Updated student {record.student_id} from ABSENT to EXCUSED "
                         f"based on approved leave request {leave_request.id}"
                     )
         
-        # ✅ GỌI AI SERVICE LẤY ẢNH VÀ UPLOAD LÊN S3 (CHỈ NẾU KHÔNG SKIP)
-        # Nếu skip_image_upload=True, việc upload sẽ được thực hiện ở background task
+        # âœ… Gá»ŒI AI SERVICE Láº¤Y áº¢NH VÃ€ UPLOAD LÃŠN S3 (CHá»ˆ Náº¾U KHÃ”NG SKIP)
+        # Náº¿u skip_image_upload=True, viá»‡c upload sáº½ Ä‘Æ°á»£c thá»±c hiá»‡n á»Ÿ background task
         if not skip_image_upload and session.ai_session_id:
             try:
                 await self._fetch_and_upload_face_images(session)
             except Exception as e:
                 logger.error(f"Failed to fetch and upload face images: {e}")
-                # Continue without images (không block end_session)
+                # Continue without images (khÃ´ng block end_session)
             
-            # ✅ GỌI AI SERVICE LẤY ẢNH GIẢ MẠO VÀ UPLOAD LÊN S3
+            # âœ… Gá»ŒI AI SERVICE Láº¤Y áº¢NH GIáº¢ Máº O VÃ€ UPLOAD LÃŠN S3
             try:
                 await self._fetch_and_upload_spoof_images(session)
             except Exception as e:
                 logger.error(f"Failed to fetch and upload spoof images: {e}")
-                # Continue without spoof images (không block end_session)
+                # Continue without spoof images (khÃ´ng block end_session)
+
+            try:
+                await ai_service_client.delete_session(session.ai_session_id)
+            except Exception as e:
+                logger.error(f"Failed to delete AI session: {e}")
+                # Continue without blocking end_session
         
-        # Cập nhật trạng thái phiên
+        # Cáº­p nháº­t tráº¡ng thÃ¡i phiÃªn
         session.status = SessionStatus.FINISHED.value
         session.end_time = datetime.now(VIETNAM_TZ)
         self.db.commit()
         self.db.refresh(session)
         
-        # Tính thống kê
+        # TÃ­nh thá»‘ng kÃª
         class_members = self.db.query(ClassMember).filter(
             ClassMember.class_id == session.class_id
         ).all()
@@ -845,9 +948,9 @@ class AttendanceService:
         present_count = sum(1 for r in records if r.status == AttendanceStatus.PRESENT)
         absent_count = sum(1 for r in records if r.status == AttendanceStatus.ABSENT)
         excused_count = sum(1 for r in records if r.status == AttendanceStatus.EXCUSED)
-        pending_count = sum(1 for r in records if r.status == AttendanceStatus.PENDING)  # ✅ NEW
+        pending_count = sum(1 for r in records if r.status == AttendanceStatus.PENDING)  # âœ… NEW
         
-        # Chỉ tính present, không tính late vì không có trạng thái late
+        # Chá»‰ tÃ­nh present, khÃ´ng tÃ­nh late vÃ¬ khÃ´ng cÃ³ tráº¡ng thÃ¡i late
         attendance_rate = present_count / total_students * 100 if total_students > 0 else 0
         
         from app.schemas.attendance import SessionResponse
@@ -858,7 +961,7 @@ class AttendanceService:
             present_count=present_count,
             absent_count=absent_count,
             excused_count=excused_count,
-            pending_count=pending_count,  # ✅ NEW
+            pending_count=pending_count,  # âœ… NEW
             attendance_rate=round(attendance_rate, 2)
         )
     
@@ -867,10 +970,10 @@ class AttendanceService:
         current_user: User,
         session_id: int
     ):
-        """Lấy danh sách điểm danh của phiên."""
+        """Láº¥y danh sÃ¡ch Ä‘iá»ƒm danh cá»§a phiÃªn."""
         from app.schemas.attendance import SessionAttendanceListResponse, AttendanceRecordDetail, SessionResponse
         
-        # Kiểm tra quyền
+        # Kiá»ƒm tra quyá»n
         session = self.db.query(AttendanceSession).filter(
             AttendanceSession.id == session_id
         ).first()
@@ -878,17 +981,17 @@ class AttendanceService:
         if not session:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
-                detail="Không tìm thấy phiên điểm danh"
+                detail="KhÃ´ng tÃ¬m tháº¥y phiÃªn Ä‘iá»ƒm danh"
             )
         
-        # Kiểm tra quyền truy cập (teacher của lớp hoặc student trong lớp)
+        # Kiá»ƒm tra quyá»n truy cáº­p (teacher cá»§a lá»›p hoáº·c student trong lá»›p)
         if current_user.role == UserRole.TEACHER:
             teacher = self.db.query(Teacher).filter(Teacher.user_id == current_user.id).first()
             class_obj = self.db.query(Class).filter(Class.id == session.class_id).first()
             if not class_obj or class_obj.teacher_id != teacher.id:
                 raise HTTPException(
                     status_code=status.HTTP_403_FORBIDDEN,
-                    detail="Bạn không có quyền truy cập phiên này"
+                    detail="Báº¡n khÃ´ng cÃ³ quyá»n truy cáº­p phiÃªn nÃ y"
                 )
         elif current_user.role == UserRole.STUDENT:
             student = self.db.query(Student).filter(Student.user_id == current_user.id).first()
@@ -899,15 +1002,15 @@ class AttendanceService:
             if not member:
                 raise HTTPException(
                     status_code=status.HTTP_403_FORBIDDEN,
-                    detail="Bạn không thuộc lớp này"
+                    detail="Báº¡n khÃ´ng thuá»™c lá»›p nÃ y"
                 )
         
-        # Lấy records
+        # Láº¥y records
         records = self.db.query(AttendanceRecord).filter(
             AttendanceRecord.session_id == session_id
         ).all()
         
-        # Chuyển đổi sang schema
+        # Chuyá»ƒn Ä‘á»•i sang schema
         record_details = [
             AttendanceRecordDetail(
                 id=record.id,
@@ -924,7 +1027,7 @@ class AttendanceService:
             for record in records
         ]
         
-        # Tính thống kê
+        # TÃ­nh thá»‘ng kÃª
         class_members = self.db.query(ClassMember).filter(
             ClassMember.class_id == session.class_id
         ).all()
@@ -933,14 +1036,14 @@ class AttendanceService:
         present_count = sum(1 for r in records if r.status == AttendanceStatus.PRESENT)
         absent_count = sum(1 for r in records if r.status == AttendanceStatus.ABSENT)
         excused_count = sum(1 for r in records if r.status == AttendanceStatus.EXCUSED)
-        pending_count = sum(1 for r in records if r.status == AttendanceStatus.PENDING)  # ✅ NEW
+        pending_count = sum(1 for r in records if r.status == AttendanceStatus.PENDING)  # âœ… NEW
         
         statistics = {
             "total_students": total_students,
             "present_count": present_count,
             "absent_count": absent_count,
             "excused_count": excused_count,
-            "pending_count": pending_count,  # ✅ NEW
+            "pending_count": pending_count,  # âœ… NEW
             "attendance_rate": round(present_count / total_students * 100, 2) if total_students > 0 else 0
         }
         
@@ -959,7 +1062,7 @@ class AttendanceService:
         limit: int = 100
     ):
         """
-        Lấy danh sách các phiên điểm danh của lớp.
+        Láº¥y danh sÃ¡ch cÃ¡c phiÃªn Ä‘iá»ƒm danh cá»§a lá»›p.
         
         Returns:
             {
@@ -969,26 +1072,26 @@ class AttendanceService:
         """
         from app.schemas.attendance import SessionResponse
         
-        # Kiểm tra quyền truy cập
+        # Kiá»ƒm tra quyá»n truy cáº­p
         if current_user.role == UserRole.TEACHER:
             teacher = self.db.query(Teacher).filter(Teacher.user_id == current_user.id).first()
             if not teacher:
                 raise HTTPException(
                     status_code=status.HTTP_404_NOT_FOUND,
-                    detail="Không tìm thấy thông tin giáo viên"
+                    detail="KhÃ´ng tÃ¬m tháº¥y thÃ´ng tin giÃ¡o viÃªn"
                 )
             
             class_obj = self.db.query(Class).filter(Class.id == class_id).first()
             if not class_obj:
                 raise HTTPException(
                     status_code=status.HTTP_404_NOT_FOUND,
-                    detail="Không tìm thấy lớp học"
+                    detail="KhÃ´ng tÃ¬m tháº¥y lá»›p há»c"
                 )
             
             if class_obj.teacher_id != teacher.id:
                 raise HTTPException(
                     status_code=status.HTTP_403_FORBIDDEN,
-                    detail="Bạn không có quyền xem lớp này"
+                    detail="Báº¡n khÃ´ng cÃ³ quyá»n xem lá»›p nÃ y"
                 )
         
         elif current_user.role == UserRole.STUDENT:
@@ -996,7 +1099,7 @@ class AttendanceService:
             if not student:
                 raise HTTPException(
                     status_code=status.HTTP_404_NOT_FOUND,
-                    detail="Không tìm thấy thông tin sinh viên"
+                    detail="KhÃ´ng tÃ¬m tháº¥y thÃ´ng tin sinh viÃªn"
                 )
             
             member = self.db.query(ClassMember).filter(
@@ -1006,7 +1109,7 @@ class AttendanceService:
             if not member:
                 raise HTTPException(
                     status_code=status.HTTP_403_FORBIDDEN,
-                    detail="Bạn không thuộc lớp này"
+                    detail="Báº¡n khÃ´ng thuá»™c lá»›p nÃ y"
                 )
         
         # Build query
@@ -1017,16 +1120,16 @@ class AttendanceService:
         if status_filter:
             query = query.filter(AttendanceSession.status == status_filter)
         
-        # Đếm tổng số
+        # Äáº¿m tá»•ng sá»‘
         total = query.count()
         
-        # Lấy danh sách phiên
+        # Láº¥y danh sÃ¡ch phiÃªn
         sessions = query.order_by(AttendanceSession.start_time.desc()).offset(skip).limit(limit).all()
         
-        # Chuyển đổi sang schema và thêm statistics cho mỗi phiên
+        # Chuyá»ƒn Ä‘á»•i sang schema vÃ  thÃªm statistics cho má»—i phiÃªn
         session_responses = []
         for session in sessions:
-            # Lấy statistics của phiên
+            # Láº¥y statistics cá»§a phiÃªn
             records = self.db.query(AttendanceRecord).filter(
                 AttendanceRecord.session_id == session.id
             ).all()
@@ -1039,7 +1142,7 @@ class AttendanceService:
             present_count = sum(1 for r in records if r.status == AttendanceStatus.PRESENT)
             absent_count = sum(1 for r in records if r.status == AttendanceStatus.ABSENT)
             excused_count = sum(1 for r in records if r.status == AttendanceStatus.EXCUSED)
-            pending_count = sum(1 for r in records if r.status == AttendanceStatus.PENDING)  # ✅ NEW
+            pending_count = sum(1 for r in records if r.status == AttendanceStatus.PENDING)  # âœ… NEW
             
             session_data = SessionResponse.model_validate(session).model_dump()
             session_data["statistics"] = {
@@ -1047,7 +1150,7 @@ class AttendanceService:
                 "present_count": present_count,
                 "absent_count": absent_count,
                 "excused_count": excused_count,
-                "pending_count": pending_count,  # ✅ NEW
+                "pending_count": pending_count,  # âœ… NEW
                 "attendance_rate": round(present_count / total_students * 100, 2) if total_students > 0 else 0
             }
             session_responses.append(session_data)
@@ -1059,27 +1162,27 @@ class AttendanceService:
     
     async def _fetch_and_upload_face_images(self, session: AttendanceSession):
         """
-        Gọi AI Service lấy face crops và upload lên S3, sau đó update image_path cho records.
+        Gá»i AI Service láº¥y face crops vÃ  upload lÃªn S3, sau Ä‘Ã³ update image_path cho records.
         
         Args:
             session: AttendanceSession object
         """
         from app.services.file_service import FileService
         
-        # Lấy teacher_id để làm uploader_id
+        # Láº¥y teacher_id Ä‘á»ƒ lÃ m uploader_id
         class_obj = self.db.query(Class).filter(Class.id == session.class_id).first()
         teacher = self.db.query(Teacher).filter(Teacher.id == class_obj.teacher_id).first() if class_obj else None
         uploader_id = teacher.user_id if teacher else 1  # Fallback to system user
         
-        # Khởi tạo FileService
+        # Khá»Ÿi táº¡o FileService
         file_service = FileService(self.db)
         
         try:
-            # 1. Gọi AI Service GET /sessions/{ai_session_id}/face-crops
+            # 1. Gá»i AI Service GET /sessions/{ai_session_id}/face-crops
             ai_service_url = f"{settings.AI_SERVICE_URL}/api/v1/sessions/{session.ai_session_id}/face-crops"
             
-            # Tăng timeout dựa trên số lượng sinh viên dự kiến (2s per student)
-            # Tối thiểu 60s, tối đa 300s (5 phút)
+            # TÄƒng timeout dá»±a trÃªn sá»‘ lÆ°á»£ng sinh viÃªn dá»± kiáº¿n (2s per student)
+            # Tá»‘i thiá»ƒu 60s, tá»‘i Ä‘a 300s (5 phÃºt)
             class_members_count = self.db.query(ClassMember).filter(
                 ClassMember.class_id == session.class_id
             ).count()
@@ -1101,7 +1204,7 @@ class AttendanceService:
                 
                 logger.info(f"Fetched {len(face_crops)} face crops from AI Service")
                 
-                # 2. Upload từng ảnh lên S3 qua FileService và update DB
+                # 2. Upload tá»«ng áº£nh lÃªn S3 qua FileService vÃ  update DB
                 uploaded_count = 0
                 skipped_count = 0
                 
@@ -1132,7 +1235,7 @@ class AttendanceService:
                             logger.warning(f"Attendance record not found for student {student_code}")
                             continue
                         
-                        # ✅ Idempotency check: Skip nếu đã có ảnh
+                        # âœ… Idempotency check: Skip náº¿u Ä‘Ã£ cÃ³ áº£nh
                         if record.image_path:
                             logger.info(f"Image already uploaded for {student_code}, skipping")
                             skipped_count += 1
@@ -1150,25 +1253,25 @@ class AttendanceService:
                             category="attendance_evidence"
                         )
                         
-                        # Update attendance record với file_id (để có thể get presigned URL sau)
-                        # Lưu cả S3 URL cho backward compatibility
+                        # Update attendance record vá»›i file_id (Ä‘á»ƒ cÃ³ thá»ƒ get presigned URL sau)
+                        # LÆ°u cáº£ S3 URL cho backward compatibility
                         image_url = file_service.get_file_url(file_record.id)
                         record.image_path = image_url
                         
-                        # ✅ Commit ngay sau mỗi record để tránh mất dữ liệu
+                        # âœ… Commit ngay sau má»—i record Ä‘á»ƒ trÃ¡nh máº¥t dá»¯ liá»‡u
                         self.db.commit()
                         
                         uploaded_count += 1
                         
-                        logger.info(f"✅ Uploaded face evidence for {student_code}: file_id={file_record.id}")
+                        logger.info(f"âœ… Uploaded face evidence for {student_code}: file_id={file_record.id}")
                         
                     except Exception as e:
                         logger.error(f"Failed to process face crop for {student_code}: {e}")
-                        # Rollback transaction hiện tại nếu có lỗi
+                        # Rollback transaction hiá»‡n táº¡i náº¿u cÃ³ lá»—i
                         self.db.rollback()
                         continue
                 
-                logger.info(f"✅ Uploaded {uploaded_count}/{len(face_crops)} face images to S3 (skipped: {skipped_count})")
+                logger.info(f"âœ… Uploaded {uploaded_count}/{len(face_crops)} face images to S3 (skipped: {skipped_count})")
                 
         except Exception as e:
             logger.error(f"Error in _fetch_and_upload_face_images: {e}")
@@ -1176,7 +1279,7 @@ class AttendanceService:
 
     async def _fetch_and_upload_spoof_images(self, session: AttendanceSession):
         """
-        Gọi AI Service lấy spoof face crops và upload lên S3, sau đó tạo SpoofDetection records.
+        Gá»i AI Service láº¥y spoof face crops vÃ  upload lÃªn S3, sau Ä‘Ã³ táº¡o SpoofDetection records.
         
         Args:
             session: AttendanceSession object
@@ -1184,19 +1287,19 @@ class AttendanceService:
         from app.services.file_service import FileService
         from app.models.spoof_detection import SpoofDetection
         
-        # Lấy teacher_id để làm uploader_id
+        # Láº¥y teacher_id Ä‘á»ƒ lÃ m uploader_id
         class_obj = self.db.query(Class).filter(Class.id == session.class_id).first()
         teacher = self.db.query(Teacher).filter(Teacher.id == class_obj.teacher_id).first() if class_obj else None
         uploader_id = teacher.user_id if teacher else 1  # Fallback to system user
         
-        # Khởi tạo FileService
+        # Khá»Ÿi táº¡o FileService
         file_service = FileService(self.db)
         
         try:
-            # 1. Gọi AI Service GET /sessions/{ai_session_id}/spoof-faces
+            # 1. Gá»i AI Service GET /sessions/{ai_session_id}/spoof-faces
             ai_service_url = f"{settings.AI_SERVICE_URL}/api/v1/sessions/{session.ai_session_id}/spoof-faces"
             
-            # Timeout 60s cho việc lấy spoof images
+            # Timeout 60s cho viá»‡c láº¥y spoof images
             async with httpx.AsyncClient(timeout=60) as client:
                 response = await client.get(ai_service_url)
                 
@@ -1213,7 +1316,7 @@ class AttendanceService:
                 
                 logger.info(f"Fetched {len(spoof_faces)} spoof faces from AI Service")
                 
-                # 2. Upload từng ảnh lên S3 qua FileService và tạo SpoofDetection records
+                # 2. Upload tá»«ng áº£nh lÃªn S3 qua FileService vÃ  táº¡o SpoofDetection records
                 uploaded_count = 0
                 
                 for idx, spoof_data in enumerate(spoof_faces):
@@ -1252,7 +1355,7 @@ class AttendanceService:
                         # Get presigned URL
                         image_url = file_service.get_file_url(file_record.id)
                         
-                        # Tạo SpoofDetection record
+                        # Táº¡o SpoofDetection record
                         spoof_record = SpoofDetection(
                             session_id=session.id,
                             spoofing_type=spoofing_type,
@@ -1267,14 +1370,14 @@ class AttendanceService:
                         
                         uploaded_count += 1
                         
-                        logger.info(f"✅ Uploaded spoof evidence #{idx}: type={spoofing_type}, confidence={spoofing_confidence:.2f}")
+                        logger.info(f"âœ… Uploaded spoof evidence #{idx}: type={spoofing_type}, confidence={spoofing_confidence:.2f}")
                         
                     except Exception as e:
                         logger.error(f"Failed to process spoof face #{idx}: {e}")
                         self.db.rollback()
                         continue
                 
-                logger.info(f"✅ Uploaded {uploaded_count}/{len(spoof_faces)} spoof images to S3")
+                logger.info(f"âœ… Uploaded {uploaded_count}/{len(spoof_faces)} spoof images to S3")
                 
         except Exception as e:
             logger.error(f"Error in _fetch_and_upload_spoof_images: {e}")
@@ -1282,27 +1385,27 @@ class AttendanceService:
 
     def get_student_face_image_by_record(self, record_id: int, current_user: User) -> str:
         """
-        Lấy ảnh trực diện của sinh viên từ bản ghi điểm danh (presigned S3 URL).
+        Láº¥y áº£nh trá»±c diá»‡n cá»§a sinh viÃªn tá»« báº£n ghi Ä‘iá»ƒm danh (presigned S3 URL).
         """
         if current_user.role not in ["teacher", "admin"]:
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
-                detail="Quyền truy cập bị từ chối. Chỉ Giáo viên hoặc Admin."
+                detail="Quyá»n truy cáº­p bá»‹ tá»« chá»‘i. Chá»‰ GiÃ¡o viÃªn hoáº·c Admin."
             )
 
         from app.models.attendance_record import AttendanceRecord
         from app.models.face_registration_request import FaceRegistrationRequest
         from app.services.s3_service import s3_service
 
-        # Lấy bản ghi điểm danh
+        # Láº¥y báº£n ghi Ä‘iá»ƒm danh
         record = self.db.query(AttendanceRecord).filter(AttendanceRecord.id == record_id).first()
         if not record:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
-                detail="Không tìm thấy bản ghi điểm danh."
+                detail="KhÃ´ng tÃ¬m tháº¥y báº£n ghi Ä‘iá»ƒm danh."
             )
 
-        # Tìm đơn đăng ký khuôn mặt approved của sinh viên đó
+        # TÃ¬m Ä‘Æ¡n Ä‘Äƒng kÃ½ khuÃ´n máº·t approved cá»§a sinh viÃªn Ä‘Ã³
         reg = (
             self.db.query(FaceRegistrationRequest)
             .filter(
@@ -1316,15 +1419,15 @@ class AttendanceService:
         if not reg:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
-                detail="Sinh viên này chưa có đăng ký khuôn mặt được duyệt."
+                detail="Sinh viÃªn nÃ y chÆ°a cÃ³ Ä‘Äƒng kÃ½ khuÃ´n máº·t Ä‘Æ°á»£c duyá»‡t."
             )
 
-        # Lấy file ảnh trực diện
+        # Láº¥y file áº£nh trá»±c diá»‡n
         file_key = None
         if reg.evidence_file:
             file_key = reg.evidence_file.file_key
         elif reg.verification_data and "steps" in reg.verification_data:
-            # Fallback tìm trong verification_data JSON
+            # Fallback tÃ¬m trong verification_data JSON
             for step in reg.verification_data["steps"]:
                 if step.get("step_name") == "face_front" or step.get("step") == "face_front":
                     file_key = step.get("s3_key")
@@ -1333,7 +1436,7 @@ class AttendanceService:
         if not file_key:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
-                detail="Không tìm thấy ảnh trực diện của sinh viên."
+                detail="KhÃ´ng tÃ¬m tháº¥y áº£nh trá»±c diá»‡n cá»§a sinh viÃªn."
             )
 
         try:
@@ -1342,5 +1445,5 @@ class AttendanceService:
         except Exception as e:
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail=f"Lỗi tạo link ảnh S3: {str(e)}"
+                detail=f"Lá»—i táº¡o link áº£nh S3: {str(e)}"
             )

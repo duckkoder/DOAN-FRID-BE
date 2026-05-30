@@ -25,7 +25,7 @@ def upgrade() -> None:
     op.alter_column('document_chunks', 'chunk_index',
                existing_type=sa.INTEGER(),
                nullable=False)
-    op.drop_index('idx_document_chunks_chunk_text_trgm', table_name='document_chunks', postgresql_ops={'chunk_text': 'gin_trgm_ops'}, postgresql_using='gin')
+    op.execute('DROP INDEX IF EXISTS idx_document_chunks_chunk_text_trgm')
     op.create_index(op.f('ix_spoof_detections_id'), 'spoof_detections', ['id'], unique=False)
     # ### end Alembic commands ###
 

@@ -1,4 +1,4 @@
-"""File upload API endpoints."""
+﻿"""File upload API endpoints."""
 from uuid import UUID
 import re
 import unicodedata
@@ -20,10 +20,44 @@ from app.models.teacher import Teacher
 from app.models.file import File as StoredFile
 from app.models.user import User
 from app.services.file_service import FileService
+from app.services.document_ingestion_service import DocumentIngestionService
 from app.services.s3_service import s3_service
+from app.database.tenant_session import get_current_tenant
+from app.platform.models.tenant import Tenant
+from app.schemas.storage import (
+    PresignedDownloadResponse,
+    PresignedUploadRequest,
+    PresignedUploadResponse,
+)
+from app.storage.storage_service import tenant_storage_service
 
 
 router = APIRouter(prefix="/files", tags=["Files"])
+
+
+@router.post("/upload-url", response_model=PresignedUploadResponse)
+async def create_upload_url(
+    request: PresignedUploadRequest,
+    current_user: User = Depends(get_current_user),
+    tenant: Tenant = Depends(get_current_tenant),
+):
+    """Create a tenant-scoped presigned S3 upload URL."""
+    return tenant_storage_service.create_presigned_upload_url(
+        tenant=tenant,
+        folder=request.folder,
+        filename=request.filename,
+        content_type=request.content_type,
+    )
+
+
+@router.get("/download-url", response_model=PresignedDownloadResponse)
+async def create_download_url(
+    key: str,
+    current_user: User = Depends(get_current_user),
+    tenant: Tenant = Depends(get_current_tenant),
+):
+    """Create a tenant-scoped presigned S3 download URL."""
+    return tenant_storage_service.create_presigned_download_url(tenant=tenant, key=key)
 
 
 def _document_file_key(file_url: str) -> str:
@@ -44,8 +78,8 @@ def _ascii_safe_filename(filename: str | None, fallback: str = "document") -> st
 def _ensure_can_access_document(db: Session, current_user: User, document: Document) -> None:
     """
     Access check:
-    - If only_class_id is set   → check the user belongs to that class.
-    - If only course_id is set  → allow any authenticated teacher/student (course-level docs).
+    - If only_class_id is set   â†’ check the user belongs to that class.
+    - If only course_id is set  â†’ allow any authenticated teacher/student (course-level docs).
     - Admins always allowed.
     """
     if current_user.role == "admin":
@@ -126,6 +160,8 @@ async def upload_document(
     db: Session = Depends(get_db)
 ):
     """Upload document (private) and optionally register into documents table."""
+    document_bytes = await file.read()
+    await file.seek(0)
     file_service = FileService(db)
     
     file_record = await file_service.upload_and_save(
@@ -191,28 +227,8 @@ async def upload_document(
 
         document_id = str(document.id)
         document_title = document.title
-
-        # ── Trigger RAG ingestion asynchronously (only if is_embedding=True) ──
         if is_embedding:
-            import asyncio, httpx, logging
-            _log = logging.getLogger(__name__)
-
-            async def _trigger_ingest(doc_id: str, s3_key: str):
-                try:
-                    async with httpx.AsyncClient(timeout=10) as client:
-                        resp = await client.post(
-                            f"{settings.AI_SERVICE_URL}/api/v1/rag/ingest",
-                            json={"document_id": doc_id, "s3_key": s3_key},
-                            headers={"X-Callback-Secret": settings.AI_SERVICE_SECRET},
-                        )
-                        _log.info(f"RAG ingest triggered for {doc_id}: {resp.status_code}")
-                except Exception as e:
-                    _log.warning(f"RAG ingest trigger failed for {doc_id}: {e}")
-
-            asyncio.create_task(
-                _trigger_ingest(document_id, file_record.file_key)
-            )
-        # ─────────────────────────────────────────────────────────────────
+            await DocumentIngestionService.ingest_pdf_bytes(db, document_id, document_bytes)
 
     return {
         "success": True,

@@ -7,14 +7,15 @@ Handles:
 - Database updates
 - Error handling and rollback
 """
-from fastapi import APIRouter, WebSocket, WebSocketDisconnect, Depends, HTTPException, status
+from fastapi import APIRouter, WebSocket, WebSocketDisconnect, HTTPException, status, Query
 from sqlalchemy.orm import Session
 import json
 import logging
 from typing import Optional, Dict, Any, List
 from datetime import datetime
 
-from app.database.session import get_db
+from app.core.security import decode_token
+from app.database.tenant_session import tenant_db_session_by_slug
 from app.services.face_verification_service import FaceVerificationService
 from app.services.face_registration_service import FaceRegistrationDBService
 from app.services.s3_service import s3_service
@@ -575,7 +576,7 @@ class FaceRegistrationWebSocketHandler:
 async def websocket_face_registration(
     websocket: WebSocket,
     student_id: int,
-    db: Session = Depends(get_db)
+    token: Optional[str] = Query(None)
 ):
     """
     WebSocket endpoint for real-time face registration.
@@ -590,5 +591,16 @@ async def websocket_face_registration(
         Server sends: {"type": "step_completed", "step_name": "...", ...}
         Server sends: {"type": "registration_completed", "success": true, ...}
     """
-    handler = FaceRegistrationWebSocketHandler(websocket, student_id, db)
-    await handler.handle_connection()
+    payload = decode_token(token) if token else None
+    if not payload:
+        await websocket.close(code=1008, reason="Invalid token")
+        return
+
+    tenant_slug = payload.get("tenant_slug") if payload and payload.get("scope") == "tenant" else None
+    if not tenant_slug:
+        await websocket.close(code=1008, reason="Tenant token is required")
+        return
+
+    with tenant_db_session_by_slug(tenant_slug) as (db, _):
+        handler = FaceRegistrationWebSocketHandler(websocket, student_id, db)
+        await handler.handle_connection()

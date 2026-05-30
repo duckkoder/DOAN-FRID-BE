@@ -135,11 +135,13 @@ class LoginRequest(BaseModel):
     """Request body for login."""
     email: str
     password: str
+    tenant_slug: Optional[str] = Field(None, description="Tenant slug from URL, required for SaaS tenant login")
 
     model_config = {
         "json_schema_extra": {
             "examples": [
                 {
+                    "tenant_slug": "truong-a",
                     "email": "student@example.com",
                     "password": "Password123"
                 }

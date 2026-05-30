@@ -11,12 +11,15 @@ from app.api.v1 import class_posts
 from app.api.v1 import courses
 from app.api.v1 import rooms
 from app.api.v1 import documentAPI
+from app.api.v1 import tenant_settings
+from app.platform.routes import router as platform_router
 
 
 # Create main API router
 api_router = APIRouter()
 
 # Include routers
+api_router.include_router(platform_router)
 api_router.include_router(auth.router, tags=["Authentication"])
 
 # Include classAPI router
@@ -55,6 +58,7 @@ api_router.include_router(rooms.router)
 
 # Include class documents router
 api_router.include_router(documentAPI.router)
+api_router.include_router(tenant_settings.router)
 
 # Include RAG proxy router
 from app.api.v1 import rag  # noqa: E402

@@ -128,7 +128,7 @@ class AuthService:
         }
 
     @staticmethod
-    async def login(db: Session, request: LoginRequest) -> dict:
+    async def login(db: Session, request: LoginRequest, tenant: Optional[object] = None) -> dict:
         """Authenticate user and return tokens."""
         
         user = db.query(User).filter(User.email == request.email).first()
@@ -153,7 +153,7 @@ class AuthService:
                 detail="Account is deactivated. Please contact administrator."
             )
         
-        access_token, refresh_token_str = AuthService._generate_tokens(db, user)
+        access_token, refresh_token_str = AuthService._generate_tokens(db, user, tenant)
         db.commit()
         
         user_data = AuthService._build_user_response(db, user)
@@ -242,10 +242,18 @@ class AuthService:
         return {"message": "Logged out successfully"}
 
     @staticmethod
-    def _generate_tokens(db: Session, user) -> tuple[str, str]:
+    def _generate_tokens(db: Session, user, tenant: Optional[object] = None) -> tuple[str, str]:
         """Generate access and refresh tokens."""
         
         token_data = {"sub": user.email, "user_id": user.id, "role": user.role}
+        if tenant is not None:
+            token_data.update(
+                {
+                    "tenant_id": tenant.id,
+                    "tenant_slug": tenant.slug,
+                    "scope": "tenant",
+                }
+            )
         
         access_token = create_access_token(token_data)
         refresh_token_str = create_refresh_token(token_data)

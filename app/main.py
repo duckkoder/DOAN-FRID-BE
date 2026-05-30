@@ -2,12 +2,19 @@
 AI-Powered Attendance System - FastAPI Application
 Main entry point for the FastAPI application.
 """
+import logging
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from app.core.config import settings
 from app.api.v1.router import api_router
 from app.api.v1.face_registration_ws import router as face_registration_ws_router
 
+
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s %(levelname)s [%(name)s] %(message)s",
+)
 
 # Create FastAPI application instance
 app = FastAPI(

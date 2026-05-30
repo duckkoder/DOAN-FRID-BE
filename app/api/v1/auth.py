@@ -4,6 +4,7 @@ from sqlalchemy.orm import Session
 
 from app.core.database import get_db
 from app.core.dependencies import get_current_user
+from app.database.tenant_session import tenant_db_session_by_slug
 from app.models.user import User
 from app.schemas.auth import (
     RegisterRequest,
@@ -38,14 +39,18 @@ async def register(
 
 
 @router.post("/login", response_model=LoginResponse)
-async def login(
-    request: LoginRequest,
-    db: Session = Depends(get_db)
-):
+async def login(request: LoginRequest):
     """Login with email and password."""
     from app.services.auth_service import AuthService
-    
-    result = await AuthService.login(db, request)
+
+    if not request.tenant_slug:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="tenant_slug is required",
+        )
+
+    with tenant_db_session_by_slug(request.tenant_slug) as (tenant_db, tenant):
+        result = await AuthService.login(tenant_db, request, tenant)
     return {
         "message": "Login successful",
         **result

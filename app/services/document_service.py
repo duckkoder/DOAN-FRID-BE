@@ -1,10 +1,12 @@
 """Service for managing documents attached to classes or courses."""
 from sqlalchemy.orm import Session
 from sqlalchemy import or_
+import httpx
 from fastapi import HTTPException, status
 import uuid
 
 from app.models.document import Document
+from app.models.document_chunk import DocumentChunk
 from app.models.class_model import Class
 from app.models.class_member import ClassMember
 from app.models.user import User
@@ -115,3 +117,37 @@ class DocumentService:
             )
 
         return [str(doc_id) for doc_id in requested_ids]
+
+    @staticmethod
+    async def _embed_query_text(text: str) -> list[float]:
+        url = f"{settings.AI_SERVICE_URL.rstrip('/')}/api/v1/embeddings/text"
+        async with httpx.AsyncClient(timeout=120) as client:
+            response = await client.post(url, json={"texts": [text]})
+            response.raise_for_status()
+            data = response.json()
+        embeddings = data.get("embeddings") or []
+        return embeddings[0] if embeddings else []
+
+    @staticmethod
+    async def get_rag_context_chunks(db: Session, document_ids: list[str], question: str, limit: int = 8) -> list[dict]:
+        """Load relevant RAG chunks from the current tenant DB for AI generation context."""
+        requested_ids = [uuid.UUID(str(doc_id)) for doc_id in document_ids]
+        query_embedding = await DocumentService._embed_query_text(question)
+        if not query_embedding:
+            return []
+
+        chunks = (
+            db.query(DocumentChunk)
+            .filter(DocumentChunk.document_id.in_(requested_ids))
+            .order_by(DocumentChunk.embedding.cosine_distance(query_embedding))
+            .limit(limit)
+            .all()
+        )
+        return [
+            {
+                "document_id": str(chunk.document_id),
+                "page_number": chunk.page_number,
+                "chunk_text": chunk.chunk_text,
+            }
+            for chunk in chunks
+        ]

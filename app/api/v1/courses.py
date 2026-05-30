@@ -1,7 +1,4 @@
-"""Course management API endpoints for teachers."""
-import asyncio
-import httpx
-import logging
+﻿"""Course management API endpoints for teachers."""
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form, status
@@ -18,14 +15,14 @@ from app.models.document import Document
 from app.models.teacher import Teacher
 from app.models.user import User
 from app.services.file_service import FileService
+from app.services.document_ingestion_service import DocumentIngestionService
 from app.schemas.class_schema import DeleteWithPasswordRequest
 
 router = APIRouter(prefix="/teacher/courses", tags=["Course Management"])
 
-_log = logging.getLogger(__name__)
 
 
-# ── Helpers ────────────────────────────────────────────────────────────────
+# â”€â”€ Helpers â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 def _get_teacher(db: Session, current_user: User) -> Teacher:
     if current_user.role != "teacher":
@@ -47,20 +44,7 @@ def _get_course_owned_by_teacher(db: Session, course_id: UUID, teacher: Teacher)
     return course
 
 
-async def _trigger_rag_ingest(doc_id: str, s3_key: str):
-    try:
-        async with httpx.AsyncClient(timeout=10) as client:
-            resp = await client.post(
-                f"{settings.AI_SERVICE_URL}/api/v1/rag/ingest",
-                json={"document_id": doc_id, "s3_key": s3_key},
-                headers={"X-Callback-Secret": settings.AI_SERVICE_SECRET},
-            )
-            _log.info(f"RAG ingest triggered for {doc_id}: {resp.status_code}")
-    except Exception as e:
-        _log.warning(f"RAG ingest trigger failed for {doc_id}: {e}")
-
-
-# ── Schemas ────────────────────────────────────────────────────────────────
+# â”€â”€ Schemas â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 class CreateCourseRequest(BaseModel):
     code: str
@@ -73,7 +57,7 @@ class UpdateCourseRequest(BaseModel):
     description: str | None = None
 
 
-# ── Course CRUD Endpoints ──────────────────────────────────────────────────
+# â”€â”€ Course CRUD Endpoints â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 @router.get("")
 def list_courses(
@@ -235,7 +219,7 @@ def delete_course(
     """Delete a course (cascade deletes documents and unlinks classes) with password verification."""
     from app.core.security import verify_password
     if not verify_password(payload.password, current_user.password_hash):
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Mật khẩu không chính xác")
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Máº­t kháº©u khÃ´ng chÃ­nh xÃ¡c")
 
     teacher = _get_teacher(db, current_user)
     course = _get_course_owned_by_teacher(db, course_id, teacher)
@@ -246,7 +230,7 @@ def delete_course(
     return {"success": True, "message": "Course deleted"}
 
 
-# ── Document Management Endpoints ──────────────────────────────────────────
+# â”€â”€ Document Management Endpoints â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 @router.post("/{course_id}/documents")
 async def upload_course_document(
@@ -264,6 +248,8 @@ async def upload_course_document(
     """
     teacher = _get_teacher(db, current_user)
     course = _get_course_owned_by_teacher(db, course_id, teacher)
+    document_bytes = await file.read()
+    await file.seek(0)
 
     file_service = FileService(db)
     file_record = await file_service.upload_and_save(
@@ -284,10 +270,8 @@ async def upload_course_document(
     db.add(document)
     db.commit()
     db.refresh(document)
-
-    # Trigger RAG ingest only if is_embedding=True
     if is_embedding:
-        asyncio.create_task(_trigger_rag_ingest(str(document.id), file_record.file_key))
+        await DocumentIngestionService.ingest_pdf_bytes(db, str(document.id), document_bytes)
 
     return {
         "success": True,
@@ -327,7 +311,7 @@ def delete_course_document(
     return {"success": True, "message": "Document deleted"}
 
 
-# ── Class-specific Document Upload ────────────────────────────────────────
+# â”€â”€ Class-specific Document Upload â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 @router.post("/{course_id}/classes/{class_id}/documents")
 async def upload_class_private_document(
@@ -345,6 +329,8 @@ async def upload_class_private_document(
     - is_embedding: True => AI will index this document for RAG chat.
     """
     teacher = _get_teacher(db, current_user)
+    document_bytes = await file.read()
+    await file.seek(0)
 
     # Verify the class belongs to this teacher and this course
     class_obj = db.query(Class).filter(
@@ -379,10 +365,8 @@ async def upload_class_private_document(
     db.add(document)
     db.commit()
     db.refresh(document)
-
-    # Trigger RAG ingest only if is_embedding=True
     if is_embedding:
-        asyncio.create_task(_trigger_rag_ingest(str(document.id), file_record.file_key))
+        await DocumentIngestionService.ingest_pdf_bytes(db, str(document.id), document_bytes)
 
     return {
         "success": True,
