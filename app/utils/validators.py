@@ -83,9 +83,8 @@ def validate_student_email(email: str) -> tuple[bool, Optional[str]]:
     Validate student email format.
     
     Requirements:
-    - Must end with @sv1.dut.udn.vn
     - Part before @ must be exactly 9 digits
-    - Example: 102220347@sv1.dut.udn.vn
+    - Domain is tenant-configurable
     
     Args:
         email: Email string to validate
@@ -93,9 +92,9 @@ def validate_student_email(email: str) -> tuple[bool, Optional[str]]:
     Returns:
         Tuple of (is_valid, error_message)
     """
-    pattern = r'^[0-9]{9}@sv1\.dut\.udn\.vn$'
+    pattern = r'^[0-9]{9}@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$'
     if not re.match(pattern, email):
-        return False, "Email sinh viên phải có dạng: 9 chữ số + @sv1.dut.udn.vn (VD: 102220347@sv1.dut.udn.vn)"
+        return False, "Email sinh viên phải có dạng: 9 chữ số + @tên-miền"
     return True, None
 
 
@@ -104,8 +103,8 @@ def validate_teacher_email(email: str) -> tuple[bool, Optional[str]]:
     Validate teacher email format.
     
     Requirements:
-    - Must end with @dut.udn.vn
-    - Part before @ can be any valid email format
+    - Must be a valid email
+    - Domain is tenant-configurable
     
     Args:
         email: Email string to validate
@@ -113,9 +112,8 @@ def validate_teacher_email(email: str) -> tuple[bool, Optional[str]]:
     Returns:
         Tuple of (is_valid, error_message)
     """
-    pattern = r'^[a-zA-Z0-9._%+-]+@dut\.udn\.vn$'
-    if not re.match(pattern, email):
-        return False, "Email giáo viên phải có dạng: tên + @dut.udn.vn"
+    if not validate_email(email):
+        return False, "Email giáo viên không hợp lệ"
     return True, None
 
 
@@ -124,12 +122,12 @@ def extract_student_code_from_email(email: str) -> Optional[str]:
     Extract student code (9 digits) from student email.
     
     Args:
-        email: Student email (format: 102220347@sv1.dut.udn.vn)
+        email: Student email (format: 102220347@example.edu.vn)
         
     Returns:
         Student code (9 digits) or None if invalid
     """
-    match = re.match(r'^([0-9]{9})@sv1\.dut\.udn\.vn$', email)
+    match = re.match(r'^([0-9]{9})@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$', email)
     if match:
         return match.group(1)
     return None

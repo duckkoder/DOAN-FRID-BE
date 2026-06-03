@@ -28,3 +28,5 @@ class Tenant(PlatformBaseModel):
     storage_bucket = Column(String(255), nullable=True)
     storage_region = Column(String(100), nullable=True)
     storage_prefix = Column(String(255), nullable=False)
+    logo_key = Column(String(500), nullable=True)
+    logo_url = Column(String(500), nullable=True)

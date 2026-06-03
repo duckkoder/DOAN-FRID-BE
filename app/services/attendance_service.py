@@ -52,8 +52,9 @@ PERIOD_TIME_SLOTS = {
 class AttendanceService:
     """Service xá»­ lÃ½ logic Ä‘iá»ƒm danh vá»›i AI-Service integration."""
     
-    def __init__(self, db: Session):
+    def __init__(self, db: Session, tenant_code: str | None = None):
         self.db = db
+        self.tenant_code = tenant_code or "tenant"
 
     def _extract_period_numbers(self, period_range: Optional[str]) -> List[int]:
         if not period_range:
@@ -1248,7 +1249,7 @@ class AttendanceService:
                         file_record = await file_service.upload_base64_and_save(
                             base64_data=face_crop_base64,
                             filename=filename,
-                            folder="private/attendance-evidence",
+                            folder=f"{self.tenant_code}/attendance-evidence",
                             uploader_id=uploader_id,
                             category="attendance_evidence"
                         )
@@ -1347,7 +1348,7 @@ class AttendanceService:
                         file_record = await file_service.upload_base64_and_save(
                             base64_data=face_crop_base64,
                             filename=filename,
-                            folder="private/spoof-detections",
+                            folder=f"{self.tenant_code}/spoof-detections",
                             uploader_id=uploader_id,
                             category="spoof_detection"
                         )

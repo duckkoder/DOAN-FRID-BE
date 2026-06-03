@@ -77,8 +77,9 @@ class S3Service:
     async def upload_file(
         self,
         file: UploadFile,
-        folder: Literal["public/avatars","public/documents", "private/documents", "private/faces", "private/attendance-evidence"],
-        file_type: Literal["image", "document"] = "image"
+        folder: str,
+        file_type: Literal["image", "document"] = "image",
+        is_public: bool | None = None,
     ) -> dict:
         """Upload file to S3."""
         
@@ -110,15 +111,15 @@ class S3Service:
                 Metadata=metadata
             )
             
-            is_public = folder.startswith("public/")
-            file_url = f"{settings.S3_BASE_URL}/{s3_key}" if is_public else None
+            resolved_is_public = folder.startswith("public/") if is_public is None else is_public
+            file_url = f"{settings.S3_BASE_URL}/{s3_key}" if resolved_is_public else None
             
             return {
                 "file_key": s3_key,
                 "file_url": file_url,
                 "file_size": len(file_content),
                 "file_name": file.filename,
-                "is_public": is_public
+                "is_public": resolved_is_public
             }
             
         except ClientError as e:
@@ -245,7 +246,7 @@ class S3Service:
                 detail=f"Delete failed: {str(e)}"
             )
     
-    def generate_face_image_path(self, student_id: int, step_name: str, step_number: int) -> str:
+    def generate_face_image_path(self, student_id: int, step_name: str, step_number: int, tenant_code: str | None = None) -> str:
         """
         Generate S3 path for face registration image.
         
@@ -259,7 +260,8 @@ class S3Service:
         """
         timestamp = datetime.utcnow().strftime('%Y%m%d_%H%M%S')
         filename = f"{step_number:02d}_{step_name}_{timestamp}.jpg"
-        s3_key = f"private/faces/student_{student_id}/{filename}"
+        prefix = f"{tenant_code}/face" if tenant_code else "private/faces"
+        s3_key = f"{prefix}/student_{student_id}/{filename}"
         return s3_key
     
     async def upload_face_image(
@@ -268,7 +270,8 @@ class S3Service:
         student_id: int,
         step_name: str,
         step_number: int,
-        metadata: dict = None
+        metadata: dict = None,
+        tenant_code: str | None = None,
     ) -> dict:
         """
         Upload face image to S3.
@@ -283,7 +286,7 @@ class S3Service:
         Returns:
             Dict with file_key and file_size (NO URL - generate on-demand when needed)
         """
-        s3_key = self.generate_face_image_path(student_id, step_name, step_number)
+        s3_key = self.generate_face_image_path(student_id, step_name, step_number, tenant_code=tenant_code)
         
         # Prepare metadata
         s3_metadata = {
@@ -329,7 +332,8 @@ class S3Service:
     async def batch_upload_face_images(
         self,
         images_data: list[dict],
-        student_id: int
+        student_id: int,
+        tenant_code: str | None = None,
     ) -> list[dict]:
         """
         Batch upload multiple face images.
@@ -354,7 +358,8 @@ class S3Service:
                     student_id=student_id,
                     step_name=image_info["step_name"],
                     step_number=image_info["step_number"],
-                    metadata=image_info.get("metadata")
+                    metadata=image_info.get("metadata"),
+                    tenant_code=tenant_code
                 )
                 results.append({
                     "success": True,

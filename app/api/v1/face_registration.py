@@ -2,10 +2,12 @@
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 
-from app.database.session import get_db
+from app.core.database import get_db
+from app.database.tenant_session import get_current_tenant
 from app.core.dependencies import get_current_user
 from app.models.student import Student
 from app.models.user import User
+from app.platform.models.tenant import Tenant
 from app.services.face_registration_service import FaceRegistrationDBService
 
 router = APIRouter(prefix="/face-registration", tags=["Face Registration"])
@@ -209,7 +211,8 @@ async def load_pending_review_images(
 async def confirm_pending_review(
     accept: bool,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(get_current_user),
+    tenant: Tenant = Depends(get_current_tenant)
 ):
     """
     Confirm or reject pending review images.
@@ -283,7 +286,8 @@ async def confirm_pending_review(
                     student_id=student_id,
                     step_name=temp_data["step_name"],
                     step_number=temp_data["step_number"],
-                    metadata=temp_data["pose_angles"]
+                    metadata=temp_data["pose_angles"],
+                    tenant_code=tenant.school_code
                 )
                 
                 # Create metadata for file record

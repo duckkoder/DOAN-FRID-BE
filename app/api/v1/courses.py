@@ -5,15 +5,16 @@ from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form, s
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
-from app.core.config import settings
 from app.core.database import get_db
 from app.core.dependencies import get_current_user
+from app.database.tenant_session import get_current_tenant
 from app.models.class_member import ClassMember
 from app.models.class_model import Class
 from app.models.course import Course
 from app.models.document import Document
 from app.models.teacher import Teacher
 from app.models.user import User
+from app.platform.models.tenant import Tenant
 from app.services.file_service import FileService
 from app.services.document_ingestion_service import DocumentIngestionService
 from app.schemas.class_schema import DeleteWithPasswordRequest
@@ -239,6 +240,7 @@ async def upload_course_document(
     title: str | None = Form(default=None),
     is_embedding: bool = Form(default=True),
     current_user: User = Depends(get_current_user),
+    tenant: Tenant = Depends(get_current_tenant),
     db: Session = Depends(get_db)
 ):
     """
@@ -254,17 +256,18 @@ async def upload_course_document(
     file_service = FileService(db)
     file_record = await file_service.upload_and_save(
         file=file,
-        folder="public/documents",
+        folder=f"{tenant.school_code}/document",
         uploader_id=current_user.id,
         category="course_document",
-        file_type="document"
+        file_type="document",
+        is_public=False,
     )
 
     document = Document(
         course_id=course.id,
         only_class_id=None,  # Shared across all classes in this course
         title=title or file_record.original_name or file_record.filename,
-        file_url=f"{settings.S3_BASE_URL}/{file_record.file_key}",
+        file_url=file_record.file_key,
         is_embedding=is_embedding,
     )
     db.add(document)
@@ -321,6 +324,7 @@ async def upload_class_private_document(
     title: str | None = Form(default=None),
     is_embedding: bool = Form(default=True),
     current_user: User = Depends(get_current_user),
+    tenant: Tenant = Depends(get_current_tenant),
     db: Session = Depends(get_db)
 ):
     """
@@ -349,17 +353,18 @@ async def upload_class_private_document(
     file_service = FileService(db)
     file_record = await file_service.upload_and_save(
         file=file,
-        folder="public/documents",
+        folder=f"{tenant.school_code}/document",
         uploader_id=current_user.id,
         category="class_document",
-        file_type="document"
+        file_type="document",
+        is_public=False,
     )
 
     document = Document(
         course_id=course.id,
         only_class_id=class_obj.id,  # Integer class ID
         title=title or file_record.original_name or file_record.filename,
-        file_url=f"{settings.S3_BASE_URL}/{file_record.file_key}",
+        file_url=file_record.file_key,
         is_embedding=is_embedding,
     )
     db.add(document)

@@ -108,21 +108,56 @@ def ensure_tenant_extensions(tenant: Tenant) -> None:
         conn.close()
 
 
-def run_tenant_migrations(tenant: Tenant) -> None:
-    """Run Alembic migrations against a tenant database."""
+def run_tenant_alembic(tenant: Tenant, args: list[str]) -> subprocess.CompletedProcess[str]:
+    """Run an Alembic command against a tenant database."""
     env = os.environ.copy()
     env["ALEMBIC_DATABASE_URL"] = build_tenant_database_url(tenant)
     env["PYTHONIOENCODING"] = "utf-8"
-    result = subprocess.run(
-        [sys.executable, "-m", "alembic", "upgrade", "head"],
+    return subprocess.run(
+        [sys.executable, "-m", "alembic", *args],
         cwd=os.path.dirname(os.path.dirname(os.path.dirname(__file__))),
         env=env,
         capture_output=True,
         text=True,
         check=False,
     )
+
+
+def run_tenant_migrations(tenant: Tenant) -> None:
+    """Run Alembic migrations against a tenant database."""
+    result = run_tenant_alembic(tenant, ["upgrade", "head"])
     if result.returncode != 0:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Tenant migration failed: {result.stderr or result.stdout}",
+        )
+
+
+def run_tenant_downgrade(tenant: Tenant, revision: str) -> None:
+    """Downgrade a tenant database to a specific Alembic revision."""
+    if not re.match(r"^[a-zA-Z0-9_+\-]+$", revision):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid Alembic revision",
+        )
+    result = run_tenant_alembic(tenant, ["downgrade", revision])
+    if result.returncode != 0:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Tenant downgrade failed: {result.stderr or result.stdout}",
+        )
+
+
+def run_tenant_upgrade(tenant: Tenant, revision: str) -> None:
+    """Upgrade a tenant database to a specific Alembic revision."""
+    if not re.match(r"^[a-zA-Z0-9_+\-]+$", revision):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid Alembic revision",
+        )
+    result = run_tenant_alembic(tenant, ["upgrade", revision])
+    if result.returncode != 0:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Tenant upgrade failed: {result.stderr or result.stdout}",
         )

@@ -1,9 +1,22 @@
 from sqlalchemy.orm import Session
+from sqlalchemy import func
 from fastapi import HTTPException, status
 from app.models.room import Room
 from app.schemas.room_schema import RoomCreate, RoomUpdate
 
 class RoomService:
+    @staticmethod
+    def _normalize_room_name(name: str) -> str:
+        return " ".join(name.strip().split())
+
+    @staticmethod
+    def _find_by_name(db: Session, name: str, exclude_id: int | None = None) -> Room | None:
+        normalized = RoomService._normalize_room_name(name)
+        query = db.query(Room).filter(func.lower(Room.name) == normalized.lower())
+        if exclude_id is not None:
+            query = query.filter(Room.id != exclude_id)
+        return query.first()
+
     @staticmethod
     def get_rooms(db: Session, active_only: bool = False):
         query = db.query(Room)
@@ -13,14 +26,20 @@ class RoomService:
 
     @staticmethod
     def create_room(db: Session, payload: RoomCreate) -> Room:
-        existing_room = db.query(Room).filter(Room.name == payload.name).first()
+        room_name = RoomService._normalize_room_name(payload.name)
+        if not room_name:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Room name is required")
+
+        existing_room = RoomService._find_by_name(db, room_name)
         if existing_room:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST, 
-                detail=f"Room name '{payload.name}' already exists"
+                detail=f"Room name '{room_name}' already exists"
             )
         
-        new_room = Room(**payload.model_dump())
+        room_data = payload.model_dump()
+        room_data["name"] = room_name
+        new_room = Room(**room_data)
         db.add(new_room)
         db.commit()
         db.refresh(new_room)
@@ -32,15 +51,20 @@ class RoomService:
         if not room:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Room not found")
         
-        if payload.name and payload.name != room.name:
-            existing_room = db.query(Room).filter(Room.name == payload.name).first()
+        update_data = payload.model_dump(exclude_unset=True)
+        if update_data.get("name") is not None:
+            update_data["name"] = RoomService._normalize_room_name(update_data["name"])
+            if not update_data["name"]:
+                raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Room name is required")
+
+        if update_data.get("name") and update_data["name"].lower() != room.name.lower():
+            existing_room = RoomService._find_by_name(db, update_data["name"], exclude_id=room_id)
             if existing_room:
                 raise HTTPException(
                     status_code=status.HTTP_400_BAD_REQUEST, 
-                    detail=f"Room name '{payload.name}' already exists"
+                    detail=f"Room name '{update_data['name']}' already exists"
                 )
         
-        update_data = payload.model_dump(exclude_unset=True)
         for key, value in update_data.items():
             setattr(room, key, value)
             

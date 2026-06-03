@@ -9,7 +9,6 @@ env_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), ".env")
 load_dotenv(env_path, override=True)
 
 from app.models.base import Base
-from app.models.test import Test  # noqa: F401
 
 
 config = context.config

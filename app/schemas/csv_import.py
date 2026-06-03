@@ -102,7 +102,7 @@ class TeacherCSVRow(BaseModel):
     """Single teacher row from CSV."""
     row_number: int = Field(..., description="Row number in CSV")
     full_name: str = Field(..., min_length=2, max_length=255)
-    email: str = Field(..., description="Email prefix (before @dut.udn.vn)")
+    email: str = Field(..., description="Email prefix before tenant teacher email domain")
     password: str = Field(..., min_length=8, max_length=100)
     phone: Optional[str] = Field(None, max_length=50)
     department_name: Optional[str] = Field(None)

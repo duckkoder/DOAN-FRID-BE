@@ -2,6 +2,8 @@
 import secrets
 import logging
 
+import boto3
+from botocore.exceptions import BotoCoreError, ClientError
 from fastapi import HTTPException, status
 from sqlalchemy.orm import Session
 
@@ -46,6 +48,40 @@ def get_public_tenant_by_slug_or_404(db: Session, slug: str) -> Tenant:
     return tenant
 
 
+def get_effective_storage_bucket(tenant: Tenant) -> str:
+    """Return the real S3 bucket. Legacy tenants may store generated bucket names."""
+    if tenant.storage_bucket and not tenant.storage_bucket.startswith("bucket-s3-"):
+        return tenant.storage_bucket
+    return settings.AWS_S3_BUCKET_NAME
+
+
+def ensure_tenant_storage_folders(tenant: Tenant) -> None:
+    """Create tenant folder markers in the configured S3 bucket."""
+    if tenant.storage_provider != "s3":
+        return
+
+    bucket = get_effective_storage_bucket(tenant)
+    region = tenant.storage_region or settings.AWS_REGION
+    prefix = tenant.storage_prefix.strip("/").rstrip("/")
+    if not prefix:
+        return
+
+    client = boto3.client(
+        "s3",
+        aws_access_key_id=settings.AWS_ACCESS_KEY_ID,
+        aws_secret_access_key=settings.AWS_SECRET_ACCESS_KEY,
+        region_name=region,
+    )
+
+    for folder in settings.TENANT_STORAGE_FOLDERS_LIST:
+        client.put_object(
+            Bucket=bucket,
+            Key=f"{prefix}/{folder}/",
+            Body=b"",
+            ContentType="application/x-directory",
+        )
+
+
 class TenantService:
 
     @staticmethod
@@ -78,6 +114,8 @@ class TenantService:
         """Update tenant display metadata. School code/slug stays immutable."""
         tenant = get_tenant_or_404(db, tenant_id)
         tenant.name = request.name.strip()
+        if request.logo_url is not None:
+            tenant.logo_url = request.logo_url
         db.commit()
         db.refresh(tenant)
         return tenant
@@ -114,9 +152,10 @@ class TenantService:
             db_user=f"db_user_{db_code}",
             db_password_encrypted=encrypt_secret(secrets.token_urlsafe(24)),
             storage_provider=request.storage_provider,
-            storage_bucket=f"bucket-s3-{school_code}",
+            storage_bucket=settings.AWS_S3_BUCKET_NAME,
             storage_region=request.storage_region,
-            storage_prefix=f"tenants/{school_code}/",
+            storage_prefix=f"{school_code}/",
+            logo_url=request.logo_url,
         )
         db.add(tenant)
         try:
@@ -124,6 +163,7 @@ class TenantService:
             create_tenant_database(tenant)
             ensure_tenant_extensions(tenant)
             run_tenant_migrations(tenant)
+            ensure_tenant_storage_folders(tenant)
             db.commit()
             db.refresh(tenant)
             logger.info(
@@ -134,6 +174,12 @@ class TenantService:
         except HTTPException:
             db.rollback()
             raise
+        except (BotoCoreError, ClientError) as exc:
+            db.rollback()
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=f"Tạo folder S3 cho tenant thất bại: {exc}",
+            ) from exc
         except Exception as exc:
             db.rollback()
             raise HTTPException(

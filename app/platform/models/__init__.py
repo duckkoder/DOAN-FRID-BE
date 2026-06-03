@@ -31,4 +31,4 @@ class PlatformBaseModel(PlatformBase):
 
 from app.platform.models.platform_user import PlatformUser  # noqa: E402,F401
 from app.platform.models.tenant import Tenant  # noqa: E402,F401
-
+from app.platform.models.platform_audit_log import PlatformAuditLog  # noqa: E402,F401

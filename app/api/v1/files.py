@@ -22,7 +22,7 @@ from app.models.user import User
 from app.services.file_service import FileService
 from app.services.document_ingestion_service import DocumentIngestionService
 from app.services.s3_service import s3_service
-from app.database.tenant_session import get_current_tenant
+from app.database.tenant_session import get_current_tenant, tenant_db_session_by_slug
 from app.platform.models.tenant import Tenant
 from app.schemas.storage import (
     PresignedDownloadResponse,
@@ -75,6 +75,13 @@ def _ascii_safe_filename(filename: str | None, fallback: str = "document") -> st
     return ascii_name or fallback
 
 
+def _public_file_url(tenant_slug: str, file_id: int) -> str:
+    return (
+        f"{settings.BACKEND_BASE_URL.rstrip('/')}"
+        f"{settings.API_V1_STR}/files/public/{tenant_slug}/{file_id}/content"
+    )
+
+
 def _ensure_can_access_document(db: Session, current_user: User, document: Document) -> None:
     """
     Access check:
@@ -120,6 +127,7 @@ def _ensure_can_access_document(db: Session, current_user: User, document: Docum
 async def upload_avatar(
     file: UploadFile = File(...),
     current_user: User = Depends(get_current_user),
+    tenant: Tenant = Depends(get_current_tenant),
     db: Session = Depends(get_db)
 ):
     """Upload avatar (public)."""
@@ -127,14 +135,14 @@ async def upload_avatar(
     
     file_record = await file_service.upload_and_save(
         file=file,
-        folder="public/avatars",
+        folder=f"{tenant.school_code}/avatar",
         uploader_id=current_user.id,
         category="avatar",
-        file_type="image"
+        file_type="image",
+        is_public=True,
     )
     
-    # Get URL
-    file_url = file_service.get_file_url(file_record.id)
+    file_url = _public_file_url(tenant.slug, file_record.id)
     
     return {
         "success": True,
@@ -157,6 +165,7 @@ async def upload_document(
     title: str | None = Form(default=None),
     is_embedding: bool = Form(default=True),
     current_user: User = Depends(get_current_user),
+    tenant: Tenant = Depends(get_current_tenant),
     db: Session = Depends(get_db)
 ):
     """Upload document (private) and optionally register into documents table."""
@@ -164,12 +173,14 @@ async def upload_document(
     await file.seek(0)
     file_service = FileService(db)
     
+    is_class_document = bool(course_id or only_class_id)
     file_record = await file_service.upload_and_save(
         file=file,
-        folder="public/documents",
+        folder=f"{tenant.school_code}/{'document' if is_class_document else 'leaveresponses'}",
         uploader_id=current_user.id,
-        category="document",
-        file_type="document"
+        category="document" if is_class_document else "leave_evidence",
+        file_type="document",
+        is_public=False,
     )
     
     # Get presigned URL
@@ -199,7 +210,7 @@ async def upload_document(
                 course_id=None,
                 only_class_id=only_class_int,
                 title=title or file_record.original_name or file_record.filename,
-                file_url=f"{settings.S3_BASE_URL}/{file_record.file_key}",
+                file_url=file_record.file_key,
                 is_embedding=is_embedding,
             )
 
@@ -217,7 +228,7 @@ async def upload_document(
                 course_id=course_uuid,
                 only_class_id=only_class_int,
                 title=title or file_record.original_name or file_record.filename,
-                file_url=f"{settings.S3_BASE_URL}/{file_record.file_key}",
+                file_url=file_record.file_key,
                 is_embedding=is_embedding,
             )
 
@@ -285,6 +296,7 @@ async def stream_document_content(
 async def upload_face_image(
     file: UploadFile = File(...),
     current_user: User = Depends(get_current_user),
+    tenant: Tenant = Depends(get_current_tenant),
     db: Session = Depends(get_db)
 ):
     """Upload face image (private)."""
@@ -292,10 +304,11 @@ async def upload_face_image(
     
     file_record = await file_service.upload_and_save(
         file=file,
-        folder="private/faces",
+        folder=f"{tenant.school_code}/face",
         uploader_id=current_user.id,
         category="face_image",
-        file_type="image"
+        file_type="image",
+        is_public=False,
     )
     
     return {
@@ -328,6 +341,33 @@ async def get_download_url(
             "url": url
         }
     }
+
+
+@router.get("/public/{tenant_slug}/{file_id}/content")
+async def stream_public_file_content(
+    tenant_slug: str,
+    file_id: int,
+):
+    """Stream public files through backend so S3 buckets can remain private."""
+    with tenant_db_session_by_slug(tenant_slug) as (db, _):
+        file_record = db.query(StoredFile).filter(StoredFile.id == file_id, StoredFile.is_public == True).first()
+        if not file_record:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Public file not found")
+
+        try:
+            obj = s3_service.s3_client.get_object(Bucket=s3_service.bucket_name, Key=file_record.file_key)
+        except ClientError:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="File not found in storage")
+
+        content_type = obj.get("ContentType") or file_record.mime_type or "application/octet-stream"
+        original_name = (file_record.original_name or "file").strip()
+        safe_name = _ascii_safe_filename(original_name, fallback="file")
+        encoded_name = quote(original_name, safe="")
+        headers = {
+            "Content-Disposition": f"inline; filename=\"{safe_name}\"; filename*=UTF-8''{encoded_name}"
+        }
+
+        return StreamingResponse(obj["Body"], media_type=content_type, headers=headers)
 
 
 @router.get("/{file_id}/content")
@@ -382,6 +422,7 @@ async def delete_file(
 @router.get("/my-files")
 async def get_my_files(
     current_user: User = Depends(get_current_user),
+    tenant: Tenant = Depends(get_current_tenant),
     db: Session = Depends(get_db)
 ):
     """Get files uploaded by current user."""
@@ -391,12 +432,13 @@ async def get_my_files(
     
     result = []
     for f in files:
-        url = file_service.get_file_url(f.id) if not f.is_public else f"{db.query(StoredFile).first()}"
+        url = _public_file_url(tenant.slug, f.id) if f.is_public else file_service.get_file_url(f.id)
         result.append({
             "file_id": f.id,
             "filename": f.filename,
             "original_name": f.original_name,
             "category": f.category,
+            "url": url,
             "size": f.size,
             "is_public": f.is_public,
             "created_at": f.created_at.isoformat()

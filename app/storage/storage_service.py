@@ -17,10 +17,14 @@ class TenantStorageService:
         self.client = create_s3_client()
 
     def _bucket(self, tenant: Tenant) -> str:
-        return tenant.storage_bucket or settings.AWS_S3_BUCKET_NAME
+        if tenant.storage_bucket and not tenant.storage_bucket.startswith("bucket-s3-"):
+            return tenant.storage_bucket
+        return settings.AWS_S3_BUCKET_NAME
 
     def _prefix(self, tenant: Tenant) -> str:
-        prefix = tenant.storage_prefix or f"tenants/{tenant.slug}/"
+        prefix = tenant.storage_prefix or f"{tenant.slug}/"
+        if prefix.strip("/").startswith(f"tenants/{tenant.slug}"):
+            prefix = f"{tenant.slug}/"
         return prefix if prefix.endswith("/") else f"{prefix}/"
 
     def build_key(self, tenant: Tenant, folder: str, filename: str) -> str:

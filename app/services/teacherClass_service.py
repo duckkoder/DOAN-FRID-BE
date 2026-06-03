@@ -3,6 +3,7 @@ from datetime import datetime
 from typing import Dict, Optional, List
 import random
 import string
+from sqlalchemy import func
 from sqlalchemy.orm import Session
 from fastapi import HTTPException, status
 
@@ -22,6 +23,22 @@ from app.services.file_service import FileService  # ✅ Add this
 
 
 class TeacherClassService:
+    @staticmethod
+    def _normalize_location(location: Optional[str]) -> Optional[str]:
+        if not location:
+            return None
+        normalized = " ".join(location.strip().split())
+        return normalized or None
+
+    @staticmethod
+    def _get_active_room_by_name(db: Session, location: str) -> Optional[Room]:
+        normalized = TeacherClassService._normalize_location(location)
+        if not normalized:
+            return None
+        return db.query(Room).filter(
+            func.lower(Room.name) == normalized.lower(),
+            Room.status == "active"
+        ).first()
 
     @staticmethod
     def _normalize_schedule_entries(schedule_payload: Dict) -> List[Dict]:
@@ -56,7 +73,7 @@ class TeacherClassService:
             normalized_entry.pop("room", None)
 
             periods = normalized_entry.get("periods") or []
-            location = normalized_entry.get("location")
+            location = TeacherClassService._normalize_location(normalized_entry.get("location"))
             day = normalized_entry.get("day")
 
             if day is None or not periods:
@@ -159,8 +176,12 @@ class TeacherClassService:
         if not location:
             return False, ""
 
+        normalized_location = TeacherClassService._normalize_location(location)
+        if not normalized_location:
+            return False, ""
+
         query = db.query(ClassSchedule).join(Class).filter(
-            ClassSchedule.location == location,
+            func.lower(ClassSchedule.location) == normalized_location.lower(),
             Class.is_active == True
         )
 
@@ -187,7 +208,7 @@ class TeacherClassService:
 
                     return (
                         True,
-                        f"Room '{location}' is already occupied on {day_name} by class '{existing_schedule.class_rel.class_name}' (Code: {existing_schedule.class_rel.class_code}). "
+                        f"Room '{normalized_location}' is already occupied on {day_name} by class '{existing_schedule.class_rel.class_name}' (Code: {existing_schedule.class_rel.class_code}). "
                         f"Overlapping periods: {conflict_periods}"
                     )
         
@@ -230,12 +251,13 @@ class TeacherClassService:
                     detail="Each schedule entry must include a location"
                 )
 
-            room_exists = db.query(Room).filter(Room.name == location, Room.status == "active").first()
-            if not room_exists:
+            room = TeacherClassService._get_active_room_by_name(db, location)
+            if not room:
                 raise HTTPException(
                     status_code=status.HTTP_400_BAD_REQUEST,
                     detail=f"Room '{location}' does not exist or is inactive"
                 )
+            entry["location"] = room.name
 
         if schedule_entries:
             has_conflict, conflict_msg = TeacherClassService.check_schedule_conflict(
@@ -536,12 +558,13 @@ class TeacherClassService:
                 if not location:
                     raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Each schedule entry must include a location")
 
-                room_exists = db.query(Room).filter(Room.name == location, Room.status == "active").first()
-                if not room_exists:
+                room = TeacherClassService._get_active_room_by_name(db, location)
+                if not room:
                     raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"Room '{location}' does not exist or is inactive")
+                entry["location"] = room.name
 
                 has_conflict, conflict_msg = TeacherClassService.check_location_conflict(
-                    db, location, {"schedules": [entry]}, exclude_class_id=class_id
+                    db, entry["location"], {"schedules": [entry]}, exclude_class_id=class_id
                 )
                 if has_conflict:
                     raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=conflict_msg)

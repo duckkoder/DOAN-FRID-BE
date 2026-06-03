@@ -18,3 +18,16 @@ class TenantSecretResponse(BaseModel):
 class TenantSecretListResponse(BaseModel):
     secrets: list[TenantSecretResponse]
 
+
+class TenantSettingUpsertRequest(BaseModel):
+    value: str = Field(..., min_length=1, max_length=1000)
+
+
+class TenantSettingResponse(BaseModel):
+    key_name: str
+    value: str
+    updated_at: datetime | None = None
+
+
+class TenantSettingListResponse(BaseModel):
+    settings: list[TenantSettingResponse]

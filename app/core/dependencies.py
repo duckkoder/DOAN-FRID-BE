@@ -6,7 +6,6 @@ from typing import Optional
 
 from app.core.database import get_db
 from app.core.security import decode_token
-from app.database.tenant_session import tenant_db_session_by_slug
 from app.models.user import User
 
 security = HTTPBearer()
@@ -42,14 +41,7 @@ async def get_current_user(
             headers={"WWW-Authenticate": "Bearer"},
         )
     
-    tenant_slug = payload.get("tenant_slug")
-    if tenant_slug:
-        with tenant_db_session_by_slug(tenant_slug) as (tenant_db, _):
-            user = tenant_db.query(User).filter(User.id == user_id).first()
-            if user:
-                tenant_db.expunge(user)
-    else:
-        user = db.query(User).filter(User.id == user_id).first()
+    user = db.query(User).filter(User.id == user_id).first()
     if not user:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,

@@ -50,12 +50,14 @@ class FaceRegistrationWebSocketHandler:
         self,
         websocket: WebSocket,
         student_id: int,
-        db: Session
+        db: Session,
+        tenant_code: Optional[str] = None
     ):
         """Initialize handler."""
         self.websocket = websocket
         self.student_id = student_id
         self.db = db
+        self.tenant_code = tenant_code
         
         # Services
         self.face_service = FaceVerificationService()
@@ -392,7 +394,8 @@ class FaceRegistrationWebSocketHandler:
                         student_id=self.student_id,
                         step_name=temp_data["step_name"],
                         step_number=temp_data["step_number"],
-                        metadata=temp_data["pose_angles"]
+                        metadata=temp_data["pose_angles"],
+                        tenant_code=self.tenant_code
                     )
                     
                     # Create metadata for file record
@@ -601,6 +604,11 @@ async def websocket_face_registration(
         await websocket.close(code=1008, reason="Tenant token is required")
         return
 
-    with tenant_db_session_by_slug(tenant_slug) as (db, _):
-        handler = FaceRegistrationWebSocketHandler(websocket, student_id, db)
+    with tenant_db_session_by_slug(tenant_slug) as (db, tenant):
+        handler = FaceRegistrationWebSocketHandler(
+            websocket,
+            student_id,
+            db,
+            tenant_code=tenant.school_code
+        )
         await handler.handle_connection()

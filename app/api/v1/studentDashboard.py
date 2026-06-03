@@ -5,7 +5,8 @@ from sqlalchemy.orm import Session
 from typing import Optional
 from uuid import UUID
 
-from app.core.dependencies import get_db, get_current_user # Giả sử bạn có hàm get_db trong core/dependencies.py
+from app.core.database import get_db
+from app.core.dependencies import get_current_user
 from app.schemas.studentDashboard import StudentDashboardResponseSchema, DashboardSummarySchema, AttendanceDistributionItemSchema, WeeklyAttendanceItemSchema, MonthlyTrendItemSchema, SubjectAttendanceItemSchema, RecentActivityItemSchema
 from app.services.student_dashboard_service import StudentDashboardService
 from app.models.user import User as DBUser # Import User model của SQLAlchemy

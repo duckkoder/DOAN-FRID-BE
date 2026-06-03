@@ -4,7 +4,6 @@ from typing import Literal
 
 from app.services.s3_service import s3_service
 from app.models.file import File
-from app.core.config import settings
 
 
 class FileService:
@@ -16,15 +15,16 @@ class FileService:
     async def upload_and_save(
         self,
         file: UploadFile,
-        folder: Literal["public/avatars", "private/documents", "private/faces", "private/attendance-evidence", "public/documents"],
+        folder: str,
         uploader_id: int,
         category: str,
-        file_type: Literal["image", "document"] = "image"
+        file_type: Literal["image", "document"] = "image",
+        is_public: bool | None = None,
     ) -> File:
         """Upload to S3 and save to database."""
         
         # Upload to S3
-        s3_result = await s3_service.upload_file(file, folder, file_type)
+        s3_result = await s3_service.upload_file(file, folder, file_type, is_public=is_public)
         
         # Save to DB
         file_record = File(
@@ -48,7 +48,7 @@ class FileService:
         self,
         base64_data: str,
         filename: str,
-        folder: Literal["public/avatars", "private/documents", "private/faces", "private/attendance-evidence", "public/documents"],
+        folder: str,
         uploader_id: int,
         category: str
     ) -> File:
@@ -109,7 +109,7 @@ class FileService:
             )
         
         if file_record.is_public:
-            return f"{settings.S3_BASE_URL}/{file_record.file_key}"
+            return s3_service.get_presigned_url(file_record.file_key, expires_in=3600)
         
         return s3_service.get_presigned_url(file_record.file_key)
     

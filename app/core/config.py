@@ -30,7 +30,6 @@ class Settings(BaseSettings):
         default=5432,
         description="PostgreSQL port stored for newly created tenant databases",
     )
-
     # Security
     SECRET_KEY: str = "your-secret-key-here-change-in-production"
     SECRET_ENCRYPTION_KEY: Optional[str] = None
@@ -53,6 +52,8 @@ class Settings(BaseSettings):
     S3_PUBLIC_FOLDER: str = "public"
     S3_PRIVATE_FOLDER: str = "private"
     S3_TEMP_FOLDER: str = "temp"
+    PLATFORM_STORAGE_PREFIX: str = "platform/"
+    TENANT_STORAGE_FOLDERS: str = "avatar,face_registration,attendance_faces,documents,leave_evidence,temp"
     
     # File limits
     MAX_FILE_SIZE_MB: int = 10
@@ -102,6 +103,10 @@ class Settings(BaseSettings):
     @property
     def ALLOWED_DOCUMENT_EXTENSIONS_LIST(self) -> list:
         return self.ALLOWED_DOCUMENT_EXTENSIONS.split(',')
+
+    @property
+    def TENANT_STORAGE_FOLDERS_LIST(self) -> list[str]:
+        return [folder.strip().strip("/") for folder in self.TENANT_STORAGE_FOLDERS.split(",") if folder.strip()]
 
     class Config:
         env_file = ".env"

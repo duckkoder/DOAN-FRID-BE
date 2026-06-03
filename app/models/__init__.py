@@ -39,6 +39,7 @@ from app.models.chat_session import ChatSession
 from app.models.chat_message import ChatMessage
 from app.models.room import Room
 from app.models.tenant_secret import TenantSecret
+from app.models.tenant_setting import TenantSetting
 
 __all__ = [
     "Base",
@@ -80,4 +81,5 @@ __all__ = [
     "ChatMessage",
     "Room",
     "TenantSecret",
+    "TenantSetting",
 ]

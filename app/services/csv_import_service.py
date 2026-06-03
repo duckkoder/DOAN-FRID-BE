@@ -15,6 +15,7 @@ from app.schemas.csv_import import (
 )
 from app.models.department import Department
 from app.models.specialization import Specialization
+from app.services.tenant_setting_service import TenantSettingService
 from app.services.student_service import StudentService
 from app.services.teacher_service import TeacherService
 
@@ -346,12 +347,13 @@ class CSVImportService:
         
         # Get department mapping
         departments = {d.name: d.id for d in db.query(Department).all()}
+        student_email_domain = TenantSettingService.get_value(db, "student_email_domain") or "sv1.dut.udn.vn"
         
         for idx, row in enumerate(rows):
             try:
                 # Construct full email from MSSV
                 mssv = row['mssv']  # 9 digits
-                full_email = f"{mssv}@sv1.dut.udn.vn"
+                full_email = f"{mssv}@{student_email_domain}"
                 student_code = mssv
                 
                 # Get department ID
@@ -473,11 +475,12 @@ class CSVImportService:
         # Get mappings
         departments = {d.name: d.id for d in db.query(Department).all()}
         specializations = {s.name: s.id for s in db.query(Specialization).all()}
+        teacher_email_domain = TenantSettingService.get_value(db, "teacher_email_domain") or "dut.udn.vn"
         
         for idx, row in enumerate(rows):
             try:
                 # Construct full email
-                full_email = f"{row['email']}@dut.udn.vn"
+                full_email = f"{row['email']}@{teacher_email_domain}"
                 
                 # Get department and specialization IDs
                 department_id = None

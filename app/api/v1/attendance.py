@@ -113,8 +113,8 @@ async def upload_images_background_task(session_id: int, ai_session_id: str, ten
         handler.setFormatter(formatter)
         logger.addHandler(handler)
     
-    with tenant_db_session_by_slug(tenant_slug) as (db, _):
-        service = AttendanceService(db)
+    with tenant_db_session_by_slug(tenant_slug) as (db, tenant):
+        service = AttendanceService(db, tenant_code=tenant.school_code)
         session = db.query(AttendanceSession).filter(
             AttendanceSession.id == session_id
         ).first()
