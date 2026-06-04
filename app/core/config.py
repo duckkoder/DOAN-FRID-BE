@@ -18,6 +18,7 @@ class Settings(BaseSettings):
     PROJECT_NAME: str = "AI Attendance System"
     VERSION: str = "1.0.0"
     API_V1_STR: str = "/api/v1"
+    ENVIRONMENT: str = "development"
     PLATFORM_DATABASE_URL: str = Field(
         default="postgresql://username:password@localhost:5432/platform_attandance_db",
         description="PostgreSQL database URL for SaaS platform metadata",

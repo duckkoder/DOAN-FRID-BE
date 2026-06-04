@@ -8,7 +8,7 @@ from typing import Any
 from dotenv import dotenv_values, set_key
 from fastapi import HTTPException, status
 
-from app.core.config import env_path, settings
+from app.core.config import env_path, project_root, settings
 from app.platform.models.platform_user import PlatformUser
 
 
@@ -31,18 +31,42 @@ class PlatformEnvConfigService:
         EnvConfigSpec("AI_CONFIDENCE_THRESHOLD", "AI confidence threshold", "Model", "float", "avg_confidence >= threshold means auto PRESENT; lower values go to pending teacher confirmation."),
         EnvConfigSpec("FACE_VERIFICATION_FPS", "Processing FPS", "Model", "int", "Number of frames per second used for face verification processing."),
         EnvConfigSpec("FACE_VERIFICATION_JPEG_QUALITY", "JPEG quality", "Model", "int", "JPEG compression quality. Suggested range: 70-90."),
-        EnvConfigSpec("FACE_VERIFICATION_TIMEOUT", "Session timeout", "Model", "int", "Maximum face verification session duration in seconds."),
         EnvConfigSpec("FACE_VERIFICATION_MIN_FACE_WIDTH", "Minimum face width", "Model", "int", "Minimum detected face width in pixels before the frame is accepted."),
         EnvConfigSpec("FACE_VERIFICATION_FRAME_WIDTH", "Frame width", "Model", "int", "Frame width used for face verification processing."),
         EnvConfigSpec("FACE_VERIFICATION_FRAME_HEIGHT", "Frame height", "Model", "int", "Frame height used for face verification processing."),
-        EnvConfigSpec("ATTENDANCE_ALLOW_CREATE_ANYTIME", "Allow create anytime", "Diem danh", "bool", "Allow teachers to create attendance sessions outside the class schedule window."),
-        EnvConfigSpec("ATTENDANCE_CREATE_WINDOW_GRACE_MINUTES", "Schedule grace minutes", "Diem danh", "int", "Additional minutes allowed when checking the attendance creation schedule window."),
+        EnvConfigSpec("DETECTOR_CONF_THRESHOLD", "Detector confidence", "AI detection", "float", "Minimum confidence for face detector boxes.", target_file="ai"),
+        EnvConfigSpec("DETECTOR_NMS_THRESHOLD", "Detector NMS", "AI detection", "float", "Non-maximum suppression threshold for face detection.", target_file="ai"),
+        EnvConfigSpec("DETECTOR_PAD", "Detector padding", "AI detection", "int", "Padding pixels added around detected faces before recognition.", target_file="ai"),
+        EnvConfigSpec("RECOGNIZER_THRESHOLD", "Recognition threshold", "AI recognition", "float", "Distance threshold used by the face recognizer.", target_file="ai"),
+        EnvConfigSpec("RECOGNIZER_KNN_K", "KNN neighbors", "AI recognition", "int", "Number of nearest embeddings used for KNN voting.", target_file="ai"),
+        EnvConfigSpec("RECOGNIZER_KNN_VOTING_THRESHOLD", "KNN vote threshold", "AI recognition", "float", "Minimum KNN voting score required for recognition.", target_file="ai"),
+        EnvConfigSpec("ANTISPOOFING_THRESHOLD", "Anti-spoof threshold", "AI anti-spoofing", "float", "Minimum spoofing confidence threshold for anti-spoofing.", target_file="ai"),
+        EnvConfigSpec("ANTISPOOFING_BLOCK_RECOGNITION", "Block spoof recognition", "AI anti-spoofing", "bool", "Block recognition results when anti-spoofing marks a face as fake.", target_file="ai"),
+        EnvConfigSpec("REC_ENABLE_DYNAMIC_THRESHOLD", "Dynamic threshold", "AI recognition", "bool", "Enable identity-aware dynamic recognition threshold.", target_file="ai"),
+        EnvConfigSpec("REC_IDENTITY_QUANTILE", "Identity quantile", "AI recognition", "float", "Quantile used to calculate identity-specific threshold.", target_file="ai"),
+        EnvConfigSpec("REC_IDENTITY_MARGIN", "Identity margin", "AI recognition", "float", "Extra margin added to identity-specific threshold.", target_file="ai"),
+        EnvConfigSpec("REC_IDENTITY_MIN_SCALE", "Identity min scale", "AI recognition", "float", "Minimum scale applied by dynamic threshold.", target_file="ai"),
+        EnvConfigSpec("REC_MIN_CONFIDENCE", "Minimum confidence", "AI filtering", "float", "Minimum calibrated confidence required for a recognition result.", target_file="ai"),
+        EnvConfigSpec("REC_MIN_VOTE_RATIO", "Minimum vote ratio", "AI filtering", "float", "Minimum vote ratio required across nearest neighbors.", target_file="ai"),
+        EnvConfigSpec("REC_MIN_VALID_NEIGHBORS_RATIO", "Valid neighbors ratio", "AI filtering", "float", "Minimum ratio of valid neighbors required for recognition.", target_file="ai"),
+        EnvConfigSpec("REC_REQUIRE_STABLE", "Require stable result", "AI filtering", "bool", "Require stable recognition across the validation window.", target_file="ai"),
+        EnvConfigSpec("REC_MAX_DISTANCE_RATIO", "Max distance ratio", "AI filtering", "float", "Maximum distance ratio allowed for recognition.", target_file="ai"),
+        EnvConfigSpec("RECOGNITION_CONFIRMATION_THRESHOLD", "Confirmation threshold", "AI validation", "int", "Number of successful recognitions required before confirming identity.", target_file="ai"),
+        EnvConfigSpec("RECOGNITION_WINDOW_SIZE", "Recognition window", "AI validation", "int", "Number of frames used by recognition validation.", target_file="ai"),
+        EnvConfigSpec("RECOGNITION_MIN_FRAME_SUCCESS_RATE", "Min frame success rate", "AI validation", "float", "Minimum successful-frame ratio required in the validation window.", target_file="ai"),
+        EnvConfigSpec("RECOGNITION_DEBOUNCE_SECONDS", "Recognition debounce", "AI validation", "int", "Seconds to wait before confirming the same identity again.", target_file="ai"),
+        EnvConfigSpec("ATTENDANCE_HEAVY_PROCESS_FACE_THRESHOLD", "Heavy process face threshold", "AI performance", "int", "Number of faces that switches AI service into heavier processing mode.", target_file="ai"),
+        EnvConfigSpec("ATTENDANCE_HEAVY_PROCESS_INTERVAL", "Heavy process interval", "AI performance", "int", "Frame interval for heavy processing mode.", target_file="ai"),
+        EnvConfigSpec("ATTENDANCE_RECOGNITION_CACHE_TTL_FRAMES", "Recognition cache TTL", "AI performance", "int", "Number of frames to keep recognition cache entries.", target_file="ai"),
     )
 
     SECURITY_SPECS: tuple[EnvConfigSpec, ...] = (
         EnvConfigSpec("ACCESS_TOKEN_EXPIRE_MINUTES", "Access token lifetime", "Dang nhap", "int", "Minutes before tenant/platform access tokens expire. 120 minutes is about 2 hours."),
         EnvConfigSpec("REFRESH_TOKEN_EXPIRE_DAYS", "Refresh token lifetime", "Dang nhap", "int", "Days a refresh token remains valid if it is not revoked by logout or admin action."),
         EnvConfigSpec("AI_WEBSOCKET_TOKEN_EXPIRE_MINUTES", "AI attendance session token", "Diem danh realtime", "int", "Minutes before the WebSocket token used by realtime attendance expires. Use about 120 minutes for long classes."),
+        EnvConfigSpec("FACE_VERIFICATION_TIMEOUT", "Face verification timeout", "Diem danh realtime", "int", "Maximum face verification session duration in seconds."),
+        EnvConfigSpec("ATTENDANCE_ALLOW_CREATE_ANYTIME", "Allow create anytime", "Van hanh", "bool", "Allow teachers to create attendance sessions outside the class schedule window."),
+        EnvConfigSpec("ATTENDANCE_CREATE_WINDOW_GRACE_MINUTES", "Schedule grace minutes", "Van hanh", "int", "Additional minutes allowed when checking the attendance creation schedule window."),
     )
 
     @classmethod
@@ -104,30 +128,28 @@ class PlatformEnvConfigService:
             "restart_required": spec.restart_required,
         }
 
-    @staticmethod
-    def _candidate_env_paths(target_file: str) -> list[str]:
-        filename = ".env.ai" if target_file == "ai" else ".env.backend"
-        env_var = "AI_ENV_FILE" if target_file == "ai" else "BACKEND_ENV_FILE"
-        infra_path = os.path.abspath(os.path.join(project_root, "..", "infra", filename))
-        return [
-            os.environ.get(env_var, ""),
-            os.path.join(project_root, filename),
-            os.path.join("/app", filename),
-            os.path.join("/home/ubuntu/frid", filename),
-            infra_path,
-            env_path,
-        ]
-
     @classmethod
     def _target_env_path(cls, spec: EnvConfigSpec) -> str:
-        for path in cls._candidate_env_paths(spec.target_file):
-            if path and os.path.exists(path):
-                return path
+        if cls._is_production():
+            env_var = "AI_ENV_FILE" if spec.target_file == "ai" else "BACKEND_ENV_FILE"
+            target_path = os.environ.get(env_var)
+            if not target_path:
+                target_path = os.path.join("/app", ".env.ai" if spec.target_file == "ai" else ".env.backend")
+            if not os.path.exists(target_path):
+                raise HTTPException(
+                    status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                    detail=f"Production env file is not mounted: {target_path}",
+                )
+            return target_path
 
-        fallback = cls._candidate_env_paths(spec.target_file)[0]
-        if fallback:
-            return fallback
+        if spec.target_file == "ai":
+            return os.path.abspath(os.path.join(project_root, "..", "ai-service", ".env"))
         return env_path
+
+    @staticmethod
+    def _is_production() -> bool:
+        environment = str(getattr(settings, "ENVIRONMENT", "") or os.environ.get("ENVIRONMENT", "")).strip().lower()
+        return environment in {"production", "prod", "release"}
 
     @classmethod
     def _read_value(cls, spec: EnvConfigSpec) -> Any:
