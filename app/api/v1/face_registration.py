@@ -1,4 +1,6 @@
 """REST API endpoints for face registration (non-WebSocket)."""
+import logging
+
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 
@@ -11,6 +13,7 @@ from app.platform.models.tenant import Tenant
 from app.services.face_registration_service import FaceRegistrationDBService
 
 router = APIRouter(prefix="/face-registration", tags=["Face Registration"])
+logger = logging.getLogger(__name__)
 
 
 def _get_current_student(db: Session, current_user: User) -> Student:
@@ -224,7 +227,6 @@ async def confirm_pending_review(
     
     # Get most recent registration with pending_student_review status
     from app.models.face_registration_request import FaceRegistrationRequest
-    from app.core.logging import logger
     
     registration = (
         db.query(FaceRegistrationRequest)
@@ -236,12 +238,28 @@ async def confirm_pending_review(
         .first()
     )
     
-    logger.info(f"Student {student_id} confirm (accept={accept}) - found registration: {registration is not None}")
+    tenant_code = getattr(tenant, "school_code", None) or getattr(tenant, "slug", None) or "unknown"
+    logger.info(
+        "face_registration.confirm_pending_review tenant=%s student_id=%s accept=%s found=%s",
+        tenant_code,
+        student_id,
+        accept,
+        registration is not None,
+    )
     if registration:
-        logger.info(f"Registration ID: {registration.id}, status: {registration.status}")
-        logger.info(f"temp_images_data type: {type(registration.temp_images_data)}")
+        logger.info(
+            "face_registration.confirm_pending_review tenant=%s registration_id=%s status=%s temp_type=%s",
+            tenant_code,
+            registration.id,
+            registration.status,
+            type(registration.temp_images_data),
+        )
         if isinstance(registration.temp_images_data, dict):
-            logger.info(f"temp_images_data keys: {registration.temp_images_data.keys()}")
+            logger.info(
+                "face_registration.confirm_pending_review tenant=%s temp_keys=%s",
+                tenant_code,
+                list(registration.temp_images_data.keys()),
+            )
     
     if not registration:
         raise HTTPException(
