@@ -8,6 +8,7 @@ import json
 from app.core.database import get_db
 from app.core.dependencies import get_current_user
 from app.database.tenant_session import get_current_tenant, tenant_db_session_by_slug
+from app.core.config import settings
 from app.models.user import User
 from app.platform.models.tenant import Tenant
 from app.models.attendance_session import AttendanceSession
@@ -148,6 +149,16 @@ async def upload_images_background_task(session_id: int, ai_session_id: str, ten
 
 
 # ============= REST API Endpoints =============
+
+@router.get("/config")
+async def get_attendance_config(
+    current_user: User = Depends(get_current_user),
+):
+    return {
+        "allow_create_anytime": settings.ATTENDANCE_ALLOW_CREATE_ANYTIME,
+        "create_window_grace_minutes": settings.ATTENDANCE_CREATE_WINDOW_GRACE_MINUTES,
+    }
+
 
 @router.post("/sessions/start", response_model=StartSessionWithAIResponse, status_code=status.HTTP_201_CREATED)
 async def start_attendance_session(
