@@ -28,12 +28,6 @@ class PlatformEnvConfigService:
     """Read and update a small whitelist of safe .env keys."""
 
     AI_MODEL_SPECS: tuple[EnvConfigSpec, ...] = (
-        EnvConfigSpec("AI_CONFIDENCE_THRESHOLD", "AI confidence threshold", "Model", "float", "avg_confidence >= threshold means auto PRESENT; lower values go to pending teacher confirmation."),
-        EnvConfigSpec("FACE_VERIFICATION_FPS", "Processing FPS", "Model", "int", "Number of frames per second used for face verification processing."),
-        EnvConfigSpec("FACE_VERIFICATION_JPEG_QUALITY", "JPEG quality", "Model", "int", "JPEG compression quality. Suggested range: 70-90."),
-        EnvConfigSpec("FACE_VERIFICATION_MIN_FACE_WIDTH", "Minimum face width", "Model", "int", "Minimum detected face width in pixels before the frame is accepted."),
-        EnvConfigSpec("FACE_VERIFICATION_FRAME_WIDTH", "Frame width", "Model", "int", "Frame width used for face verification processing."),
-        EnvConfigSpec("FACE_VERIFICATION_FRAME_HEIGHT", "Frame height", "Model", "int", "Frame height used for face verification processing."),
         EnvConfigSpec("DETECTOR_CONF_THRESHOLD", "Detector confidence", "AI detection", "float", "Minimum confidence for face detector boxes.", target_file="ai"),
         EnvConfigSpec("DETECTOR_NMS_THRESHOLD", "Detector NMS", "AI detection", "float", "Non-maximum suppression threshold for face detection.", target_file="ai"),
         EnvConfigSpec("DETECTOR_PAD", "Detector padding", "AI detection", "int", "Padding pixels added around detected faces before recognition.", target_file="ai"),
@@ -64,7 +58,7 @@ class PlatformEnvConfigService:
         EnvConfigSpec("ACCESS_TOKEN_EXPIRE_MINUTES", "Access token lifetime", "Dang nhap", "int", "Minutes before tenant/platform access tokens expire. 120 minutes is about 2 hours."),
         EnvConfigSpec("REFRESH_TOKEN_EXPIRE_DAYS", "Refresh token lifetime", "Dang nhap", "int", "Days a refresh token remains valid if it is not revoked by logout or admin action."),
         EnvConfigSpec("AI_WEBSOCKET_TOKEN_EXPIRE_MINUTES", "AI attendance session token", "Diem danh realtime", "int", "Minutes before the WebSocket token used by realtime attendance expires. Use about 120 minutes for long classes."),
-        EnvConfigSpec("FACE_VERIFICATION_TIMEOUT", "Face verification timeout", "Diem danh realtime", "int", "Maximum face verification session duration in seconds."),
+        EnvConfigSpec("AI_CONFIDENCE_THRESHOLD", "Attendance auto-confirm threshold", "Diem danh realtime", "float", "Backend threshold for avg_confidence from AI callback. Records at or above this value become PRESENT automatically; lower values stay PENDING for teacher review."),
         EnvConfigSpec("ATTENDANCE_ALLOW_CREATE_ANYTIME", "Allow create anytime", "Van hanh", "bool", "Allow teachers to create attendance sessions outside the class schedule window."),
         EnvConfigSpec("ATTENDANCE_CREATE_WINDOW_GRACE_MINUTES", "Schedule grace minutes", "Van hanh", "int", "Additional minutes allowed when checking the attendance creation schedule window."),
     )
