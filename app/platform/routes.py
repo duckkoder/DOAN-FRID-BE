@@ -152,6 +152,21 @@ async def update_ai_model_env_config(
     return PlatformEnvConfigService.update_items(request.values, current_user)
 
 
+@router.get("/env/security", response_model=PlatformEnvConfigResponse)
+async def get_security_env_config(
+    _: PlatformUser = Depends(get_current_platform_user),
+):
+    return PlatformEnvConfigService.list_security_items()
+
+
+@router.put("/env/security", response_model=PlatformEnvConfigResponse)
+async def update_security_env_config(
+    request: PlatformEnvConfigUpdateRequest,
+    current_user: PlatformUser = Depends(get_current_platform_user),
+):
+    return PlatformEnvConfigService.update_security_items(request.values, current_user)
+
+
 @router.get("/storage/usage", response_model=list[TenantStorageUsageResponse])
 async def list_storage_usage(
     db: Session = Depends(get_platform_db),

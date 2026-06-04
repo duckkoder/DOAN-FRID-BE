@@ -68,7 +68,7 @@ class Settings(BaseSettings):
         description="URL của Backend (for AI-Service callback)"
     )
     AI_SERVICE_SECRET: str = "shared-secret-key-for-hmac-verification"  # Secret key for HMAC
-    AI_WEBSOCKET_TOKEN_EXPIRE_MINUTES: int = 30  # WebSocket token expiry
+    AI_WEBSOCKET_TOKEN_EXPIRE_MINUTES: int = 120  # WebSocket token expiry
     ATTENDANCE_ALLOW_CREATE_ANYTIME: bool = False
     ATTENDANCE_CREATE_WINDOW_GRACE_MINUTES: int = 0
     

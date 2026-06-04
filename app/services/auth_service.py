@@ -12,6 +12,7 @@ from app.core.security import (
     create_refresh_token,
     decode_token,
 )
+from app.core.config import settings
 
 from app.models.user import User
 from app.models.teacher import Teacher
@@ -261,7 +262,7 @@ class AuthService:
         refresh_token = RefreshToken(
             user_id=user.id,
             token=refresh_token_str,
-            expires_at=datetime.utcnow() + timedelta(days=7),
+            expires_at=datetime.utcnow() + timedelta(days=settings.REFRESH_TOKEN_EXPIRE_DAYS),
             revoked_at=None,
         )
         db.add(refresh_token)
