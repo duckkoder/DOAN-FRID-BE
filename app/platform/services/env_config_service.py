@@ -97,7 +97,7 @@ class PlatformEnvConfigService:
 
             normalized_value = cls._normalize_value(spec, raw_value)
             target_env_path = cls._target_env_path(spec)
-            set_key(target_env_path, key, normalized_value)
+            set_key(target_env_path, key, normalized_value, quote_mode="never")
             os.environ[key] = normalized_value
             if spec.target_file == "backend":
                 cls._update_runtime_setting(spec, normalized_value)
@@ -132,15 +132,21 @@ class PlatformEnvConfigService:
     def _target_env_path(cls, spec: EnvConfigSpec) -> str:
         if cls._is_production():
             env_var = "AI_ENV_FILE" if spec.target_file == "ai" else "BACKEND_ENV_FILE"
-            target_path = os.environ.get(env_var)
-            if not target_path:
-                target_path = os.path.join("/app", ".env.ai" if spec.target_file == "ai" else ".env.backend")
-            if not os.path.exists(target_path):
+            filename = ".env.ai" if spec.target_file == "ai" else ".env.backend"
+            candidates = [
+                os.environ.get(env_var, ""),
+                os.path.join("/app", filename),
+                os.path.join("/home/ubuntu/frid", filename),
+            ]
+            for target_path in candidates:
+                if target_path and os.path.exists(target_path):
+                    return target_path
+            expected = " or ".join(path for path in candidates if path)
+            if expected:
                 raise HTTPException(
                     status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                    detail=f"Production env file is not mounted: {target_path}",
+                    detail=f"Production env file is not mounted: {expected}",
                 )
-            return target_path
 
         if spec.target_file == "ai":
             return os.path.abspath(os.path.join(project_root, "..", "ai-service", ".env"))
@@ -149,7 +155,13 @@ class PlatformEnvConfigService:
     @staticmethod
     def _is_production() -> bool:
         environment = str(getattr(settings, "ENVIRONMENT", "") or os.environ.get("ENVIRONMENT", "")).strip().lower()
-        return environment in {"production", "prod", "release"}
+        if environment in {"production", "prod", "release"}:
+            return True
+        if os.environ.get("BACKEND_ENV_FILE") or os.environ.get("AI_ENV_FILE"):
+            return True
+        if os.path.exists("/app/.env.backend") or os.path.exists("/app/.env.ai"):
+            return True
+        return str(getattr(settings, "TENANT_DB_HOST", "")).strip().lower() == "db"
 
     @classmethod
     def _read_value(cls, spec: EnvConfigSpec) -> Any:
