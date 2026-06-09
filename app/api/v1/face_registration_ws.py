@@ -596,19 +596,39 @@ async def websocket_face_registration(
     """
     payload = decode_token(token) if token else None
     if not payload:
+        logger.warning(
+            "Rejecting face-registration WebSocket: invalid or missing token",
+            extra={"student_id": student_id, "has_token": bool(token)}
+        )
         await websocket.close(code=1008, reason="Invalid token")
         return
 
     tenant_slug = payload.get("tenant_slug") if payload and payload.get("scope") == "tenant" else None
     if not tenant_slug:
+        logger.warning(
+            "Rejecting face-registration WebSocket: tenant token is required",
+            extra={
+                "student_id": student_id,
+                "scope": payload.get("scope"),
+                "role": payload.get("role"),
+                "tenant_slug": payload.get("tenant_slug"),
+            }
+        )
         await websocket.close(code=1008, reason="Tenant token is required")
         return
 
-    with tenant_db_session_by_slug(tenant_slug) as (db, tenant):
-        handler = FaceRegistrationWebSocketHandler(
-            websocket,
-            student_id,
-            db,
-            tenant_code=tenant.school_code
+    try:
+        with tenant_db_session_by_slug(tenant_slug) as (db, tenant):
+            handler = FaceRegistrationWebSocketHandler(
+                websocket,
+                student_id,
+                db,
+                tenant_code=tenant.school_code
+            )
+            await handler.handle_connection()
+    except Exception:
+        logger.exception(
+            "Face-registration WebSocket failed before session handler",
+            extra={"student_id": student_id, "tenant_slug": tenant_slug}
         )
-        await handler.handle_connection()
+        await websocket.close(code=1011, reason="Face registration service unavailable")

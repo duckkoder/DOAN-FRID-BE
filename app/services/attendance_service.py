@@ -175,7 +175,8 @@ class AttendanceService:
     async def start_session_with_ai(
         self, 
         current_user: User, 
-        request: StartSessionRequest
+        request: StartSessionRequest,
+        tenant_slug: str,
     ) -> StartSessionWithAIResponse:
         """
         Báº¯t Ä‘áº§u phiÃªn Ä‘iá»ƒm danh vá»›i AI-Service.
@@ -325,6 +326,7 @@ class AttendanceService:
                 student_codes=student_codes,
                 face_embeddings=face_embeddings,
                 ws_token=ws_token,
+                tenant_slug=tenant_slug,
                 allowed_users=[str(current_user.id)]
             )
             
@@ -1420,7 +1422,7 @@ class AttendanceService:
         if not reg:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
-                detail="Sinh viÃªn nÃ y chÆ°a cÃ³ Ä‘Äƒng kÃ½ khuÃ´n máº·t Ä‘Æ°á»£c duyá»‡t."
+                detail="Sinh viên này chưa có đăng ký khuôn mặt được duyệt."
             )
 
         # Láº¥y file áº£nh trá»±c diá»‡n

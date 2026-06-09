@@ -12,7 +12,7 @@ class StartSessionRequest(BaseModel):
     session_name: Optional[str] = Field(None, description="Tên phiên (tùy chọn)")
     late_threshold_minutes: int = Field(default=15, description="Số phút được phép trễ")
     location: Optional[str] = Field(None, description="Địa điểm điểm danh")
-    day_of_week: Optional[int] = Field(None, description="Thứ trong tuần (0=Chủ nhật, 1=Thứ 2, ..., 6=Thứ 7)")
+    day_of_week: Optional[int] = Field(None, description="Thứ trong tuần (0=Thứ 2, ..., 6=Chủ nhật)")
     period_range: Optional[str] = Field(None, description="Khoảng tiết học (VD: '1-3', '6-7')")
     session_index: Optional[int] = Field(None, description="Chỉ số buổi học trong ngày (0, 1, 2, ...)")
 

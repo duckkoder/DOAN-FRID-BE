@@ -37,6 +37,7 @@ class AIServiceClient:
         student_codes: List[str],
         face_embeddings: List[Dict[str, Any]],
         ws_token: str,
+        tenant_slug: str,
         allowed_users: Optional[List[str]] = None
     ) -> Dict:
         """
@@ -56,7 +57,10 @@ class AIServiceClient:
             httpx.HTTPError: Náº¿u request tháº¥t báº¡i
         """
         url = f"{self.base_url}/api/v1/sessions"
-        callback_url = f"{settings.BACKEND_BASE_URL}/api/v1/attendance/webhook/ai-recognition"
+        callback_url = (
+            f"{settings.BACKEND_BASE_URL}/api/v1/attendance/webhook/ai-recognition"
+            f"?tenant_slug={tenant_slug}"
+        )
         
         payload = {
             "backend_session_id": backend_session_id,

@@ -164,7 +164,8 @@ async def get_attendance_config(
 async def start_attendance_session(
     request: StartSessionRequest,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(get_current_user),
+    current_tenant: Tenant = Depends(get_current_tenant),
 ):
     """
     Bắt đầu phiên điểm danh mới với AI-Service.
@@ -187,7 +188,7 @@ async def start_attendance_session(
     - Chỉ teacher của lớp mới được phép
     """
     service = AttendanceService(db)
-    return await service.start_session_with_ai(current_user, request)
+    return await service.start_session_with_ai(current_user, request, tenant_slug=current_tenant.slug)
 
 
 @router.post("/sessions/{session_id}/resume", response_model=ResumeSessionResponse)
@@ -413,8 +414,8 @@ async def get_class_sessions(
 async def ai_recognition_webhook(
     payload: AICallbackPayload,
     request: Request,
+    tenant_slug: str,
     x_ai_signature: Optional[str] = Header(None, alias="X-AI-Signature"),
-    db: Session = Depends(get_db)
 ):
     """
     Webhook endpoint để nhận callback từ AI-Service khi có sinh viên được validate.
@@ -466,8 +467,9 @@ async def ai_recognition_webhook(
             detail="Missing X-AI-Signature header"
         )
     
-    service = AttendanceService(db)
-    return await service.handle_ai_callback(payload, x_ai_signature)
+    with tenant_db_session_by_slug(tenant_slug) as (db, tenant):
+        service = AttendanceService(db, tenant_code=tenant.school_code)
+        return await service.handle_ai_callback(payload, x_ai_signature)
 
 
 # ============= WebSocket Endpoint =============
