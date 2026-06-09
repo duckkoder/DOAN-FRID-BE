@@ -68,6 +68,7 @@ class AIServiceClient:
             "student_codes": student_codes,
             "face_embeddings": face_embeddings,
             "backend_callback_url": callback_url,
+            "tenant_slug": tenant_slug,
             "ws_token": ws_token,
             "allowed_users": allowed_users or []
         }

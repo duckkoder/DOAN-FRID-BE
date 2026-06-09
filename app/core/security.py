@@ -55,6 +55,7 @@ def create_websocket_token(
     user_id: int,
     session_id: int,
     role: str,
+    tenant_slug: Optional[str] = None,
     expires_delta: Optional[timedelta] = None
 ) -> str:
     """
@@ -75,6 +76,9 @@ def create_websocket_token(
         "role": role,
         "type": "websocket"
     }
+    if tenant_slug:
+        to_encode["tenant_slug"] = tenant_slug
+        to_encode["scope"] = "tenant"
     
     if expires_delta:
         expire = datetime.utcnow() + expires_delta

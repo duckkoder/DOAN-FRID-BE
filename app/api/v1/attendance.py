@@ -195,7 +195,8 @@ async def start_attendance_session(
 async def resume_attendance_session(
     session_id: int,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(get_current_user),
+    current_tenant: Tenant = Depends(get_current_tenant),
 ):
     """
     Resume phiên điểm danh đang ongoing sau khi refresh page.
@@ -223,7 +224,7 @@ async def resume_attendance_session(
     - Chỉ teacher của lớp mới được phép
     """
     service = AttendanceService(db)
-    return await service.resume_session(current_user, session_id)
+    return await service.resume_session(current_user, session_id, tenant_slug=current_tenant.slug)
 
 
 @router.post("/sessions/{session_id}/end", response_model=EndSessionResponse)

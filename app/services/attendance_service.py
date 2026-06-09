@@ -315,6 +315,7 @@ class AttendanceService:
             user_id=current_user.id,
             session_id=new_session.id,
             role=current_user.role,  # role is already a string
+            tenant_slug=tenant_slug,
             expires_delta=token_expires
         )
         
@@ -389,7 +390,8 @@ class AttendanceService:
     async def resume_session(
         self,
         current_user: User,
-        session_id: int
+        session_id: int,
+        tenant_slug: str,
     ) -> ResumeSessionResponse:
         """
         Resume má»™t phiÃªn Ä‘iá»ƒm danh Ä‘ang ongoing sau khi refresh page.
@@ -509,6 +511,7 @@ class AttendanceService:
             user_id=current_user.id,
             session_id=session.id,
             role=current_user.role,
+            tenant_slug=tenant_slug,
             expires_delta=token_expires
         )
         
