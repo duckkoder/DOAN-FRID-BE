@@ -1,10 +1,13 @@
 """Service for leave request operations."""
 from datetime import datetime
+from zoneinfo import ZoneInfo
 from typing import Dict, Optional, List
 from sqlalchemy.orm import Session
 from fastapi import HTTPException, status
 
 from app.models.leave_request import LeaveRequest
+from app.models.attendance_record import AttendanceRecord
+from app.models.attendance_session import AttendanceSession
 from app.models.student import Student
 from app.models.teacher import Teacher
 from app.models.class_model import Class
@@ -17,11 +20,70 @@ from app.schemas.leaveRequest import (
     ReviewLeaveRequestRequest
 )
 from app.services.file_service import FileService
+from app.core.enums import AttendanceStatus, RequestStatus
 from app.core.exceptions import ValidationError  # Import custom ValidationError
 from app.utils.datetime_helper import format_datetime_iso, format_datetime_iso_optional
 
+VIETNAM_TZ = ZoneInfo("Asia/Ho_Chi_Minh")
+
 
 class LeaveRequestService:
+    @staticmethod
+    def _to_vietnam_date(value: datetime):
+        if value.tzinfo is None:
+            return value.date()
+        return value.astimezone(VIETNAM_TZ).date()
+
+    @staticmethod
+    def _periods_overlap(left: Optional[str], right: Optional[str]) -> bool:
+        if not left or not right:
+            return True
+
+        def parse_periods(value: str) -> set[int]:
+            parts = [int(part) for part in value.split("-") if part.strip().isdigit()]
+            if len(parts) >= 2:
+                return set(range(parts[0], parts[-1] + 1))
+            return set(parts)
+
+        left_periods = parse_periods(left)
+        right_periods = parse_periods(right)
+        if not left_periods or not right_periods:
+            return True
+        return bool(left_periods & right_periods)
+
+    @staticmethod
+    def _apply_approved_leave_to_attendance(db: Session, leave_request: LeaveRequest) -> int:
+        if leave_request.status != RequestStatus.APPROVED.value:
+            return 0
+
+        leave_date = LeaveRequestService._to_vietnam_date(leave_request.leave_date)
+        sessions = db.query(AttendanceSession).filter(
+            AttendanceSession.class_id == leave_request.class_id,
+            AttendanceSession.day_of_week == leave_request.day_of_week,
+        ).all()
+
+        updated_count = 0
+        for session in sessions:
+            if LeaveRequestService._to_vietnam_date(session.start_time) != leave_date:
+                continue
+            if not LeaveRequestService._periods_overlap(session.period_range, leave_request.time_slot):
+                continue
+
+            record = db.query(AttendanceRecord).filter(
+                AttendanceRecord.session_id == session.id,
+                AttendanceRecord.student_id == leave_request.student_id,
+                AttendanceRecord.status == AttendanceStatus.ABSENT.value,
+            ).first()
+            if not record:
+                continue
+
+            record.status = AttendanceStatus.EXCUSED.value
+            record.notes = f"Approved leave request (ID: {leave_request.id})"
+            record.recorded_at = datetime.now(VIETNAM_TZ)
+            updated_count += 1
+
+        return updated_count
+
     
     @staticmethod
     async def create_leave_request(
@@ -573,6 +635,7 @@ class LeaveRequestService:
         leave_request.review_notes = payload.review_notes
         leave_request.reviewed_at = datetime.utcnow()
         leave_request.updated_at = datetime.utcnow()
+        applied_attendance_count = LeaveRequestService._apply_approved_leave_to_attendance(db, leave_request)
         
         db.commit()
         db.refresh(leave_request)
@@ -583,7 +646,8 @@ class LeaveRequestService:
                 "leaveRequest": {
                     "id": leave_request.id,
                     "status": leave_request.status,
-                    "reviewedAt": format_datetime_iso(leave_request.reviewed_at)
+                    "reviewedAt": format_datetime_iso(leave_request.reviewed_at),
+                    "appliedAttendanceCount": applied_attendance_count,
                 }
             },
             "message": f"Leave request {payload.status} successfully"
@@ -845,11 +909,13 @@ class LeaveRequestService:
                 leave_request.review_notes = review_notes
                 leave_request.reviewed_at = datetime.utcnow()
                 leave_request.updated_at = datetime.utcnow()
+                applied_attendance_count = LeaveRequestService._apply_approved_leave_to_attendance(db, leave_request)
                 
                 results.append({
                     "id": req_id,
                     "status": status,
-                    "success": True
+                    "success": True,
+                    "appliedAttendanceCount": applied_attendance_count,
                 })
                 success_count += 1
                 

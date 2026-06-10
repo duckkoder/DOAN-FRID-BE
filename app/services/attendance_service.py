@@ -72,9 +72,6 @@ class AttendanceService:
         return time(hour=hour, minute=minute)
 
     def _validate_session_create_window(self, request: StartSessionRequest) -> None:
-        if settings.ATTENDANCE_ALLOW_CREATE_ANYTIME:
-            return
-
         if request.day_of_week is None or not request.period_range:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
@@ -127,6 +124,10 @@ class AttendanceService:
             self._parse_period_time(PERIOD_TIME_SLOTS[last_period][1]),
             tzinfo=VIETNAM_TZ,
         )
+
+        if settings.ATTENDANCE_ALLOW_CREATE_ANYTIME:
+            return
+
         grace = timedelta(minutes=max(settings.ATTENDANCE_CREATE_WINDOW_GRACE_MINUTES, 0))
 
         if now < session_start - grace or now > session_end + grace:

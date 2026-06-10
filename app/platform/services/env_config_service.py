@@ -57,10 +57,7 @@ class PlatformEnvConfigService:
     SECURITY_SPECS: tuple[EnvConfigSpec, ...] = (
         EnvConfigSpec("ACCESS_TOKEN_EXPIRE_MINUTES", "Access token lifetime", "Dang nhap", "int", "Minutes before tenant/platform access tokens expire. 120 minutes is about 2 hours."),
         EnvConfigSpec("REFRESH_TOKEN_EXPIRE_DAYS", "Refresh token lifetime", "Dang nhap", "int", "Days a refresh token remains valid if it is not revoked by logout or admin action."),
-        EnvConfigSpec("AI_WEBSOCKET_TOKEN_EXPIRE_MINUTES", "AI attendance session token", "Diem danh realtime", "int", "Minutes before the WebSocket token used by realtime attendance expires. Use about 120 minutes for long classes."),
-        EnvConfigSpec("AI_CONFIDENCE_THRESHOLD", "Attendance auto-confirm threshold", "Diem danh realtime", "float", "Backend threshold for avg_confidence from AI callback. Records at or above this value become PRESENT automatically; lower values stay PENDING for teacher review."),
-        EnvConfigSpec("ATTENDANCE_ALLOW_CREATE_ANYTIME", "Allow create anytime", "Van hanh", "bool", "Allow teachers to create attendance sessions outside the class schedule window."),
-        EnvConfigSpec("ATTENDANCE_CREATE_WINDOW_GRACE_MINUTES", "Schedule grace minutes", "Van hanh", "int", "Additional minutes allowed when checking the attendance creation schedule window."),
+        EnvConfigSpec("ATTENDANCE_ALLOW_CREATE_ANYTIME", "Allow create attendance anytime", "Van hanh", "bool", "Allow teachers to create attendance sessions outside the class schedule window."),
     )
 
     @classmethod
@@ -212,8 +209,6 @@ class PlatformEnvConfigService:
                 value = float(raw_value)
             except (TypeError, ValueError):
                 raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"{spec.key} must be number")
-            if spec.key == "AI_CONFIDENCE_THRESHOLD" and not 0 <= value <= 1:
-                raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="AI_CONFIDENCE_THRESHOLD must be between 0 and 1")
             return str(value)
 
         return str(raw_value).strip()
