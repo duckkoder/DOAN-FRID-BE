@@ -71,6 +71,22 @@ class AttendanceService:
         hour, minute = [int(part) for part in value.split(":", 1)]
         return time(hour=hour, minute=minute)
 
+    def _periods_overlap(self, left: Optional[str], right: Optional[str]) -> bool:
+        if not left or not right:
+            return True
+
+        def parse_periods(value: str) -> set[int]:
+            parts = [int(part) for part in value.split("-") if part.strip().isdigit()]
+            if len(parts) >= 2:
+                return set(range(parts[0], parts[-1] + 1))
+            return set(parts)
+
+        left_periods = parse_periods(left)
+        right_periods = parse_periods(right)
+        if not left_periods or not right_periods:
+            return True
+        return bool(left_periods & right_periods)
+
     def _validate_session_create_window(self, request: StartSessionRequest) -> None:
         if request.day_of_week is None or not request.period_range:
             raise HTTPException(
@@ -879,6 +895,7 @@ class AttendanceService:
             approved_leave_requests = self.db.query(LeaveRequest).filter(
                 LeaveRequest.class_id == session.class_id,
                 LeaveRequest.status == RequestStatus.APPROVED.value,
+                LeaveRequest.day_of_week == session.day_of_week,
                 or_(
                     # Case 1: leave_date lÃ  UTC aware datetime
                     (LeaveRequest.leave_date >= day_start_utc) & (LeaveRequest.leave_date < day_end_utc),
@@ -893,19 +910,21 @@ class AttendanceService:
             for lr in approved_leave_requests:
                 logger.info(f"  - LeaveRequest ID={lr.id}, student_id={lr.student_id}, leave_date={lr.leave_date}")
             
-            # Táº¡o map student_id -> leave_request Ä‘á»ƒ tra cá»©u nhanh
-            approved_student_ids = {lr.student_id: lr for lr in approved_leave_requests}
+            approved_by_student: dict[int, list[LeaveRequest]] = {}
+            for lr in approved_leave_requests:
+                approved_by_student.setdefault(lr.student_id, []).append(lr)
             
             # Cáº­p nháº­t status cho cÃ¡c sinh viÃªn cÃ³ Ä‘Æ¡n Ä‘Æ°á»£c duyá»‡t
             excused_count = 0
             for record in absent_records:
-                if record.student_id in approved_student_ids:
-                    leave_request = approved_student_ids[record.student_id]
-                    
-                    # Kiá»ƒm tra thÃªm vá» time_slot náº¿u cáº§n (tÃ¹y chá»n)
-                    # CÃ³ thá»ƒ match vá»›i period_range hoáº·c session_index
-                    # á»ž Ä‘Ã¢y tÃ´i cáº­p nháº­t táº¥t cáº£ absent cÃ³ Ä‘Æ¡n trong ngÃ y
-                    
+                leave_request = next(
+                    (
+                        lr for lr in approved_by_student.get(record.student_id, [])
+                        if self._periods_overlap(session.period_range, lr.time_slot)
+                    ),
+                    None,
+                )
+                if leave_request:
                     record.status = AttendanceStatus.EXCUSED
                     record.notes = f"ÄÃ£ cÃ³ Ä‘Æ¡n xin nghá»‰ Ä‘Æ°á»£c cháº¥p nháº­n (ID: {leave_request.id})"
                     excused_count += 1
