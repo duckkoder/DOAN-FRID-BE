@@ -220,7 +220,7 @@ def delete_course(
     """Delete a course (cascade deletes documents and unlinks classes) with password verification."""
     from app.core.security import verify_password
     if not verify_password(payload.password, current_user.password_hash):
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Máº­t kháº©u khÃ´ng chÃ­nh xÃ¡c")
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Mật khẩu không chính xác")
 
     teacher = _get_teacher(db, current_user)
     course = _get_course_owned_by_teacher(db, course_id, teacher)

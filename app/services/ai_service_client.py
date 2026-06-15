@@ -1,4 +1,4 @@
-﻿"""AI Service HTTP Client for communication with face recognition service."""
+"""AI Service HTTP Client for communication with face recognition service."""
 import httpx
 import logging
 from typing import Dict, List, Optional, Any
@@ -41,20 +41,20 @@ class AIServiceClient:
         allowed_users: Optional[List[str]] = None
     ) -> Dict:
         """
-        Táº¡o session má»›i trong AI-Service.
+        Tạo session mới trong AI-Service.
         
         Args:
-            backend_session_id: ID cá»§a session trong backend DB
-            class_id: ID cá»§a lá»›p há»c
-            student_codes: Danh sÃ¡ch mÃ£ sinh viÃªn
+            backend_session_id: ID của session trong backend DB
+            class_id: ID của lớp học
+            student_codes: Danh sách mã sinh viên
             ws_token: JWT token cho WebSocket authentication
-            allowed_users: Danh sÃ¡ch user Ä‘Æ°á»£c phÃ©p (RBAC)
+            allowed_users: Danh sách user được phép (RBAC)
             
         Returns:
-            Dict chá»©a session_id, ws_url, expires_at
+            Dict chứa session_id, ws_url, expires_at
             
         Raises:
-            httpx.HTTPError: Náº¿u request tháº¥t báº¡i
+            httpx.HTTPError: Nếu request thất bại
         """
         url = f"{self.base_url}/api/v1/sessions"
         callback_url = (
@@ -104,16 +104,16 @@ class AIServiceClient:
     
     async def get_session_status(self, ai_session_id: str) -> Dict:
         """
-        Láº¥y tráº¡ng thÃ¡i session tá»« AI-Service.
+        Lấy trạng thái session từ AI-Service.
         
         Args:
-            ai_session_id: ID cá»§a session trong AI-Service
+            ai_session_id: ID của session trong AI-Service
             
         Returns:
-            Dict chá»©a status, statistics
+            Dict chứa status, statistics
             
         Raises:
-            httpx.HTTPError: Náº¿u request tháº¥t báº¡i
+            httpx.HTTPError: Nếu request thất bại
         """
         url = f"{self.base_url}/api/v1/sessions/{ai_session_id}"
         
