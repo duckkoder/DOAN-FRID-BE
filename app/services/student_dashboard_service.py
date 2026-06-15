@@ -68,10 +68,11 @@ class StudentDashboardService:
         present_count = sum(1 for r in all_records if r.status == "present")
         late_count = sum(1 for r in all_records if r.status == "late")
         absent_count = sum(1 for r in all_records if r.status == "absent")
+        excused_count = sum(1 for r in all_records if r.status == "excused")
 
         attendance_rate = 0.0
         if total_sessions_attended > 0:
-            attendance_rate = ((present_count + late_count) / total_sessions_attended) * 100
+            attendance_rate = ((present_count + late_count + excused_count) / total_sessions_attended) * 100
 
         # 3. This week's attendance
         today = datetime.now().date()
@@ -237,7 +238,7 @@ class StudentDashboardService:
                 attended_records_in_month = self.db.query(AttendanceRecord).filter(
                     AttendanceRecord.student_id == student_id,
                     AttendanceRecord.session_id.in_(session_ids_in_month),
-                    AttendanceRecord.status.in_(["present", "late"])
+                    AttendanceRecord.status.in_(["present", "late", "excused"])
                 ).count()
                 
                 monthly_rate = (attended_records_in_month / total_sessions_in_month) * 100
@@ -275,7 +276,7 @@ class StudentDashboardService:
                     attended_records_for_subject = self.db.query(AttendanceRecord).filter(
                         AttendanceRecord.student_id == student_id,
                         AttendanceRecord.session_id.in_(session_ids_for_class),
-                        AttendanceRecord.status.in_(["present", "late"])
+                        AttendanceRecord.status.in_(["present", "late", "excused"])
                     ).count()
                     
                     subject_rate = (attended_records_for_subject / total_sessions_for_subject) * 100

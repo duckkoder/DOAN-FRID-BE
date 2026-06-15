@@ -129,6 +129,7 @@ class StudentAttendanceService:
         late_sessions_count = 0
         total_class_sessions = len(sessions)
 
+        excused_sessions_count = 0
         for session in sessions:
             session_location = self._resolve_session_location(session)
             record = self.db.query(AttendanceRecord).filter(
@@ -153,6 +154,8 @@ class StudentAttendanceService:
             elif student_attendance_status == "late":
                 late_sessions_count += 1
                 attended_sessions_count += 1 # Late is still considered attended
+            elif student_attendance_status == "excused":
+                excused_sessions_count += 1
             elif student_attendance_status == "absent":
                 absent_sessions_count += 1
 
@@ -174,9 +177,9 @@ class StudentAttendanceService:
             ))
         
         overall_attendance_rate = 0.0
-        # Calculate attendance rate based on attended sessions (present + late) vs total sessions
+        # Calculate attendance rate based on (attended + excused) vs total sessions
         if total_class_sessions > 0:
-            overall_attendance_rate = ((attended_sessions_count) / total_class_sessions) * 100
+            overall_attendance_rate = ((attended_sessions_count + excused_sessions_count) / total_class_sessions) * 100
 
         return StudentClassAttendanceSummary(
             class_id=class_id,
@@ -185,6 +188,7 @@ class StudentAttendanceService:
             attended_sessions=attended_sessions_count,
             absent_sessions=absent_sessions_count,
             late_sessions=late_sessions_count,
+            excused_sessions=excused_sessions_count,
             attendance_rate=round(overall_attendance_rate, 2),
             sessions=sessions_summary_list
         )
@@ -269,6 +273,7 @@ class StudentAttendanceService:
         overall_absent_sessions = 0
         overall_late_sessions = 0
 
+        overall_excused_sessions = 0
         for member in class_memberships:
             # We call the other service method for each class
             class_summary = await self.get_student_class_sessions_attendance(user_id, member.class_id)
@@ -278,10 +283,11 @@ class StudentAttendanceService:
             overall_attended_sessions += class_summary.attended_sessions
             overall_absent_sessions += class_summary.absent_sessions
             overall_late_sessions += class_summary.late_sessions
+            overall_excused_sessions += class_summary.excused_sessions
         
         overall_attendance_rate = 0.0
         if overall_total_sessions > 0:
-            overall_attendance_rate = ((overall_attended_sessions + overall_late_sessions) / overall_total_sessions) * 100
+            overall_attendance_rate = ((overall_attended_sessions + overall_excused_sessions) / overall_total_sessions) * 100
 
         return StudentAttendanceReportResponse(
             student_id=student_id,

@@ -55,6 +55,7 @@ class StudentClassAttendanceSummary(BaseModel):
     attended_sessions: int = Field(..., description="Total sessions where the student was marked 'present' or 'late'.")
     absent_sessions: int = Field(..., description="Total sessions where the student was marked 'absent'.")
     late_sessions: int = Field(..., description="Total sessions where the student was marked 'late'.")
+    excused_sessions: int = Field(0, description="Total sessions where the student was marked 'excused'.")
     attendance_rate: float = Field(..., description="Attendance rate in percentage for this class.")
     sessions: List[StudentAttendanceSessionSummarySchema] = Field(default_factory=list, description="List of detailed session attendance summaries.")
 
