@@ -23,7 +23,7 @@ var/
 .installed.cfg
 *.egg
 pip-wheel-metadata/
-
+plots/
 # Virtual environments
 env/
 venv/

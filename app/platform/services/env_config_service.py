@@ -121,6 +121,7 @@ class PlatformEnvConfigService:
 
     @classmethod
     def _target_env_path(cls, spec: EnvConfigSpec) -> str:
+        """Resolve the writable .env file path. Raises 500 if not found in production (write path)."""
         if cls._is_production():
             env_var = "AI_ENV_FILE" if spec.target_file == "ai" else "BACKEND_ENV_FILE"
             filename = ".env.ai" if spec.target_file == "ai" else ".env.backend"
@@ -143,12 +144,30 @@ class PlatformEnvConfigService:
             return os.path.abspath(os.path.join(project_root, "..", "ai-service", ".env"))
         return env_path
 
+    @classmethod
+    def _read_env_file_path(cls, spec: EnvConfigSpec) -> str | None:
+        """Resolve the readable .env file path. Returns None if file not found (read path, never raises)."""
+        if cls._is_production():
+            env_var = "AI_ENV_FILE" if spec.target_file == "ai" else "BACKEND_ENV_FILE"
+            filename = ".env.ai" if spec.target_file == "ai" else ".env.backend"
+            candidates = [
+                os.environ.get(env_var, ""),
+                os.path.join("/app", filename),
+                os.path.join("/home/ubuntu/frid", filename),
+            ]
+            for target_path in candidates:
+                if target_path and os.path.exists(target_path):
+                    return target_path
+            return None  # File not accessible in container — use env vars instead
+
+        if spec.target_file == "ai":
+            return os.path.abspath(os.path.join(project_root, "..", "ai-service", ".env"))
+        return env_path
+
     @staticmethod
     def _is_production() -> bool:
         environment = str(getattr(settings, "ENVIRONMENT", "") or os.environ.get("ENVIRONMENT", "")).strip().lower()
         if environment in {"production", "prod", "release"}:
-            return True
-        if os.environ.get("BACKEND_ENV_FILE") or os.environ.get("AI_ENV_FILE"):
             return True
         if os.path.exists("/app/.env.backend") or os.path.exists("/app/.env.ai"):
             return True
@@ -156,12 +175,15 @@ class PlatformEnvConfigService:
 
     @classmethod
     def _read_value(cls, spec: EnvConfigSpec) -> Any:
-        target_path = cls._target_env_path(spec)
-        file_values = dotenv_values(target_path) if os.path.exists(target_path) else {}
-        if spec.key in file_values:
-            return file_values[spec.key]
+        """Read a config value: prefer .env file if accessible, else fall back to os.environ / settings."""
+        target_path = cls._read_env_file_path(spec)
+        if target_path and os.path.exists(target_path):
+            file_values = dotenv_values(target_path)
+            if spec.key in file_values:
+                return file_values[spec.key]
+        # Fallback: read from live environment (injected by docker-compose env_file)
         if spec.target_file == "backend":
-            return getattr(settings, spec.key, None)
+            return getattr(settings, spec.key, None) or os.environ.get(spec.key)
         return os.environ.get(spec.key)
 
     @staticmethod
