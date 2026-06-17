@@ -1,10 +1,10 @@
-﻿"""File upload API endpoints."""
+"""File upload API endpoints."""
 from uuid import UUID
 import re
 import unicodedata
 from urllib.parse import quote
 
-from fastapi import APIRouter, UploadFile, File, Form, Depends, HTTPException, status
+from fastapi import APIRouter, BackgroundTasks, UploadFile, File, Form, Depends, HTTPException, status
 from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 from botocore.exceptions import ClientError
@@ -160,6 +160,7 @@ async def upload_avatar(
 @router.post("/upload/document")
 async def upload_document(
     file: UploadFile = File(...),
+    background_tasks: BackgroundTasks,
     course_id: str | None = Form(default=None),
     only_class_id: str | None = Form(default=None),
     title: str | None = Form(default=None),
@@ -239,7 +240,7 @@ async def upload_document(
         document_id = str(document.id)
         document_title = document.title
         if is_embedding:
-            await DocumentIngestionService.ingest_pdf_bytes(db, document_id, document_bytes)
+            background_tasks.add_task(DocumentIngestionService.ingest_pdf_bytes, db, document_id, document_bytes)
 
     return {
         "success": True,
