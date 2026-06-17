@@ -159,8 +159,8 @@ async def upload_avatar(
 
 @router.post("/upload/document")
 async def upload_document(
-    file: UploadFile = File(...),
     background_tasks: BackgroundTasks,
+    file: UploadFile = File(...),
     course_id: str | None = Form(default=None),
     only_class_id: str | None = Form(default=None),
     title: str | None = Form(default=None),
